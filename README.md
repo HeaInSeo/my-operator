@@ -48,22 +48,18 @@ For rapid iteration, we provide a Developer Entrypoint Script. This script perfo
 ```
 2. Run the controller locally:
 
-By default, both the metrics endpoint and custom SLI instrumentation are disabled for security and overhead reasons.  
-
-For local development and SLI validation, it is recommended to explicitly enable:  
-
-- the metrics endpoint, and  
-- the SLI recorder (e.g. e2e convergence measurement)  
+By default, the metrics endpoint is disabled for security reasons.  
+For local development, it is recommended to explicitly enable the metrics endpoint when running the controller.    
 
 Run the controller with the following command:
 
 ```bash
-make run ARGS="--metrics-bind-address=:8080 --metrics-secure=false --slo-enabled=true"
+make run ARGS="--metrics-bind-address=:8080 --metrics-secure=false"
 ```
 With this configuration:
 - Health and readiness probes are exposed on port 8081.  
-- Prometheus metrics are exposed on http://localhost:8080/metrics
-- Custom SLI metrics (for example, e2e_convergence_time_seconds) are enabled and recorded during reconciliation.    
+- Prometheus metrics are exposed on http://localhost:8080/metrics  
+
 After starting the controller, you can verify metrics availability by accessing the metrics endpoint directly from your local machine.  
 
 3. Test your changes: Open a new terminal and apply sample CRs:
