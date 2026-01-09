@@ -46,11 +46,21 @@ For rapid iteration, we provide a Developer Entrypoint Script. This script perfo
 # or
 # ./hack/dev-start-kubectl.sh
 ```
-2. Run the controller locally: Follow the instructions printed by the script above. Usually, it involves:
+2. Run the controller locally:
+
+By default, the metrics endpoint is disabled for security reasons.
+For local development and SLI validation, it is recommended to explicitly enable the metrics endpoint when running the controller.
+
+Run the controller with the following command:
 
 ```bash
-make run
+make run ARGS="--metrics-bind-address=:8080 --metrics-secure=false"
 ```
+With this configuration:
+- Health and readiness probes are exposed on port 8081.  
+- Prometheus metrics are exposed on http://localhost:8080/metrics  
+After starting the controller, you can verify metrics availability by accessing the metrics endpoint directly from your local machine.  
+
 3. Test your changes: Open a new terminal and apply sample CRs:
 
 ```bash
