@@ -1,10 +1,7 @@
 package e2e
 
 import (
-	"bytes"
 	"fmt"
-	"io"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -18,12 +15,26 @@ import (
 const curlMetricsPodLabel = "app=curl-metrics"
 
 // -----------------------------------------------------------------------------
+// helpers_metrics.go
+//
+// 목표 (utils.Run 전제):
+// - utils.Run()은 "성공 시 STDOUT만" 반환하므로 jsonpath 파싱 안정.
+// - wrapper kubectl의 STDERR 배너가 STDOUT 파싱을 깨지 않도록 별도 runCmdStdout 제거.
+// - 고정 podName 충돌 방지: 유니크 pod 이름 + label cleanup.
+// - 테스트/계측 모두 best-effort로 다루기 쉽게, 함수 책임 분리.
+//
+// 스타일:
+// - [OLD]/[NEW] 주석 유지
+// - 최소 변경 + 가장 안전한 버전
+// -----------------------------------------------------------------------------
+
+// -----------------------------------------------------------------------------
 // [OLD] 기존 고정 pod 방식 (참고용)
 // -----------------------------------------------------------------------------
 
 // const curlMetricsPodName = "curl-metrics"
-
-// // runCurlMetricsOnce creates a short-lived curl pod and returns its logs.
+//
+// // runCurlMetricsOnce creates a short-lived curl pod (fixed name).
 // // It does NOT wait; caller should wait for Succeeded before calling logs.
 // func runCurlMetricsOnce(ns, token, metricsSvcName, serviceAccountName string) error {
 // 	// Delete old pod if exists (ignore errors)
@@ -32,7 +43,7 @@ const curlMetricsPodLabel = "app=curl-metrics"
 // 		"-n", ns,
 // 		"--ignore-not-found=true",
 // 	))
-
+//
 // 	cmd := exec.Command(
 // 		"kubectl", "run", curlMetricsPodName,
 // 		"--restart=Never",
@@ -58,11 +69,11 @@ const curlMetricsPodLabel = "app=curl-metrics"
 // 			}
 // 		}`, token, metricsSvcName, ns, serviceAccountName),
 // 	)
-
+//
 // 	_, err := utils.Run(cmd)
 // 	return err
 // }
-
+//
 // func curlMetricsPhase(ns string) (string, error) {
 // 	cmd := exec.Command(
 // 		"kubectl", "get", "pods", curlMetricsPodName,
@@ -71,12 +82,12 @@ const curlMetricsPodLabel = "app=curl-metrics"
 // 	)
 // 	return utils.Run(cmd)
 // }
-
+//
 // func curlMetricsLogs(ns string) (string, error) {
 // 	cmd := exec.Command("kubectl", "logs", curlMetricsPodName, "-n", ns)
 // 	return utils.Run(cmd)
 // }
-
+//
 // func cleanupCurlMetricsPod(ns string) {
 // 	_, _ = utils.Run(exec.Command(
 // 		"kubectl", "delete", "pod", curlMetricsPodName,
@@ -86,10 +97,12 @@ const curlMetricsPodLabel = "app=curl-metrics"
 // }
 
 // -----------------------------------------------------------------------------
-// [NEW] 유니크 pod + label cleanup + phase/stdout-only
+// [NEW] 유니크 pod + label cleanup + utils.Run 일관 사용
+//
 // - 목적:
-//   1) "curl-metrics" 고정 이름 충돌 제거
-//   2) wrapper kubectl의 STDERR 배너가 jsonpath 파싱을 깨지 않게 STDOUT만 읽기
+//   1) "curl-metrics" 고정 이름 충돌 제거 (재실행/동시성/flake 감소)
+//   2) jsonpath 파싱 안정: utils.Run()이 성공 시 STDOUT만 반환하도록 이미 변경됨
+//   3) best-effort cleanup: label 기반 정리 + per-pod 삭제
 // -----------------------------------------------------------------------------
 
 // runCurlMetricsOnce creates a short-lived curl pod.
@@ -100,11 +113,11 @@ func runCurlMetricsOnce(ns, token, metricsSvcName, serviceAccountName string) (s
 	cleanupCurlMetricsPods(ns)
 
 	podName := fmt.Sprintf("curl-metrics-%d", time.Now().UnixNano())
-
 	metricsURL := fmt.Sprintf("https://%s.%s.svc:8443/metrics", metricsSvcName, ns)
 
-	// NOTE: keep -k for self-signed cert in test env.
-	// NOTE: do NOT use "-v" here, it adds noise; your parser already strips "< " / "> " if present.
+	// NOTE:
+	// - keep -k for self-signed cert in test env.
+	// - keep output clean: avoid "-v" (headers/noise). (instrument parser should handle most cases anyway)
 	curlCmd := fmt.Sprintf(
 		`set -euo pipefail;
 echo "[curl-metrics] url=%s";
@@ -156,13 +169,13 @@ func curlMetricsPhase(ns, podName string) (string, error) {
 		"-n", ns,
 		"-o", "jsonpath={.status.phase}",
 	)
-	out, err := runCmdStdout(cmd) // STDOUT only
+	out, err := utils.Run(cmd) // 성공 시 STDOUT만 -> jsonpath 파싱 안정
 	return strings.TrimSpace(out), err
 }
 
 func curlMetricsLogs(ns, podName string) (string, error) {
 	cmd := exec.Command("kubectl", "logs", podName, "-n", ns)
-	out, err := utils.Run(cmd) // logs are not parsing-sensitive
+	out, err := utils.Run(cmd) // logs는 파싱 민감하지 않음 (instrument가 expfmt로 파싱)
 	return out, err
 }
 
@@ -182,7 +195,7 @@ func cleanupCurlMetricsPods(ns string) {
 	_, _ = utils.Run(cmd)
 }
 
-// deletePodNoWait delete pod best-effort (no wait) - used for per-pod cleanup
+// deletePodNoWait delete pod best-effort (no wait) - used for per-pod cleanup.
 func deletePodNoWait(ns, podName string) error {
 	cmd := exec.Command(
 		"kubectl", "delete", "pod", podName,
@@ -194,94 +207,13 @@ func deletePodNoWait(ns, podName string) error {
 	return err
 }
 
-// runCmdStdout executes cmd and returns STDOUT only.
-// This avoids wrapper kubectl banners written to STDERR from breaking jsonpath parsing.
-//func runCmdStdout(cmd *exec.Cmd) (string, error) {
-//	cmd.Env = append(os.Environ(), "GO111MODULE=on")
-//
-//	command := strings.Join(cmd.Args, " ")
-//	_, _ = fmt.Fprintf(GinkgoWriter, "running: %q\n", command)
-//
-//	stdout, err := cmd.Output() // STDOUT only
-//	if err != nil {
-//		combined, _ := cmd.CombinedOutput()
-//		return "", fmt.Errorf("%q failed with error %q: %w", command, string(combined), err)
-//	}
-//	return string(stdout), nil
-//}
-
-// runCmdStdout executes cmd and returns STDOUT only.
-// This avoids wrapper kubectl banners written to STDERR from breaking jsonpath parsing.
-// STDOUT-only capture to avoid wrapper STDERR banner mixing
-func runCmdStdout(cmd *exec.Cmd) (string, error) {
-	cmd.Env = append(os.Environ(), "GO111MODULE=on")
-
-	command := strings.Join(cmd.Args, " ")
-	_, _ = fmt.Fprintf(GinkgoWriter, "running: %q\n", command)
-
-	// capture stdout only
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return "", err
-	}
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		return "", err
-	}
-
-	if err := cmd.Start(); err != nil {
-		return "", err
-	}
-
-	stdoutBytes, _ := io.ReadAll(stdoutPipe)
-	stderrBytes, _ := io.ReadAll(stderrPipe)
-
-	if err := cmd.Wait(); err != nil {
-		combined := bytes.NewBuffer(nil)
-		combined.Write(stdoutBytes)
-		combined.Write(stderrBytes)
-		return "", fmt.Errorf("%q failed with error %q: %w", command, combined.String(), err)
-	}
-
-	// IMPORTANT: return stdout only
-	return string(stdoutBytes), nil
-}
-
-//func runCmdStdout(cmd *exec.Cmd) (string, error) {
-//	cmd.Env = append(os.Environ(), "GO111MODULE=on")
-//
-//	command := strings.Join(cmd.Args, " ")
-//	_, _ = fmt.Fprintf(GinkgoWriter, "running: %q\n", command)
-//
-//	stdout, err := cmd.StdoutPipe()
-//	if err != nil {
-//		return "", err
-//	}
-//	stderr, err := cmd.StderrPipe()
-//	if err != nil {
-//		return "", err
-//	}
-//
-//	if err := cmd.Start(); err != nil {
-//		return "", err
-//	}
-//
-//	b, _ := io.ReadAll(stdout)
-//	eb, _ := io.ReadAll(stderr)
-//
-//	waitErr := cmd.Wait()
-//	if waitErr != nil {
-//		return "", fmt.Errorf("%q failed: %w (stderr=%s)", command, waitErr, string(eb))
-//	}
-//
-//	return string(b), nil
-//}
-
-// Optional convenience helper: wait for curl pod completion
+// waitCurlMetricsDone waits until the curl pod reaches a terminal phase.
+// It treats "Succeeded" or "Failed" as "done" (caller decides how to handle logs/errors).
 func waitCurlMetricsDone(ns, podName string) {
 	Eventually(func(g Gomega) {
 		phase, err := curlMetricsPhase(ns, podName)
 		g.Expect(err).NotTo(HaveOccurred())
-		g.Expect(phase == "Succeeded" || phase == "Failed").To(BeTrue(), "curl pod not done yet, phase=%s", phase)
+		g.Expect(phase == "Succeeded" || phase == "Failed").To(BeTrue(),
+			"curl pod not done yet, phase=%s", phase)
 	}, 5*time.Minute, 2*time.Second).Should(Succeed())
 }

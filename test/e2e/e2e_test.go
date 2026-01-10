@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,10 +52,9 @@ const controllerManagerDeploymentName = "my-operator-controller-manager"
 
 // -----------------------------------------------------------------------------
 // NOTE
-// - You are using a wrapped "kubectl" that prints a banner to STDERR.
-// - utils.Run() uses CombinedOutput(), so STDERR is mixed into returned output.
-// - For parsing-sensitive commands, this file uses runCmdStdout() which reads
-//   STDOUT only, so the wrapper banner won't break parsing.
+// - utils.Run() returns STDOUT only on success (stable for jsonpath parsing)
+// - On failure, error contains stderr+stdout for debugging
+// - TokenRequest keeps CombinedOutput() to preserve rich error messages.
 // -----------------------------------------------------------------------------
 
 var _ = Describe("Manager", Ordered, func() {
@@ -114,49 +112,6 @@ var _ = Describe("Manager", Ordered, func() {
 		cmd = exec.Command("kubectl", "delete", "ns", namespace)
 		_, _ = utils.Run(cmd)
 	})
-
-	// [OLD AfterEach] (kept for reference)
-	//
-	//AfterEach(func() {
-	//	specReport := CurrentSpecReport()
-	//	if specReport.Failed() {
-	//		By("Fetching controller manager pod logs")
-	//		cmd := exec.Command("kubectl", "logs", controllerPodName, "-n", namespace)
-	//		controllerLogs, err := utils.Run(cmd)
-	//		if err == nil {
-	//			_, _ = fmt.Fprintf(GinkgoWriter, "Controller logs:\n%s\n", controllerLogs)
-	//		} else {
-	//			_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get Controller logs: %v\n", err)
-	//		}
-	//
-	//		By("Fetching Kubernetes events")
-	//		cmd = exec.Command("kubectl", "get", "events", "-n", namespace, "--sort-by=.lastTimestamp")
-	//		eventsOutput, err := utils.Run(cmd)
-	//		if err == nil {
-	//			_, _ = fmt.Fprintf(GinkgoWriter, "Kubernetes events:\n%s\n", eventsOutput)
-	//		} else {
-	//			_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get Kubernetes events: %v\n", err)
-	//		}
-	//
-	//		By("Fetching curl-metrics logs")
-	//		cmd = exec.Command("kubectl", "logs", "curl-metrics", "-n", namespace)
-	//		metricsOutput, err := utils.Run(cmd)
-	//		if err == nil {
-	//			_, _ = fmt.Fprintf(GinkgoWriter, "Metrics logs:\n%s\n", metricsOutput)
-	//		} else {
-	//			_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get curl-metrics logs: %v\n", err)
-	//		}
-	//
-	//		By("Fetching controller manager pod description")
-	//		cmd = exec.Command("kubectl", "describe", "pod", controllerPodName, "-n", namespace)
-	//		podDescription, err := utils.Run(cmd)
-	//		if err == nil {
-	//			_, _ = fmt.Fprintf(GinkgoWriter, "Pod description:\n%s\n", podDescription)
-	//		} else {
-	//			_, _ = fmt.Fprintf(GinkgoWriter, "Failed to describe controller pod: %v\n", err)
-	//		}
-	//	}
-	//})
 
 	AfterEach(func() {
 		specReport := CurrentSpecReport()
@@ -217,18 +172,13 @@ var _ = Describe("Manager", Ordered, func() {
 		It("should run successfully", func() {
 			By("validating that the controller-manager pod is running as expected")
 
-			// [OLD] go-template version (kept for reference)
-			// verifyControllerUp := func(g Gomega) { ... }
-			// Eventually(verifyControllerUp).Should(Succeed())
-
-			// [NEW] jsonpath + STDOUT-only capture for stable parsing with wrapped kubectl
 			verifyControllerUp := func(g Gomega) {
 				cmd := exec.Command("kubectl", "get", "pods",
 					"-n", namespace,
 					"-l", "control-plane=controller-manager",
 					"-o", "jsonpath={.items[?(@.metadata.deletionTimestamp==null)].metadata.name}",
 				)
-				podName, err := runCmdStdout(cmd)
+				podName, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred(), "Failed to retrieve controller-manager pod name")
 
 				controllerPodName = strings.TrimSpace(podName)
@@ -239,7 +189,7 @@ var _ = Describe("Manager", Ordered, func() {
 					"-n", namespace,
 					"-o", "jsonpath={.status.phase}",
 				)
-				phase, err := runCmdStdout(cmd)
+				phase, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(strings.TrimSpace(phase)).To(Equal("Running"), "Incorrect controller-manager pod status")
 			}
@@ -338,7 +288,7 @@ var _ = Describe("Manager", Ordered, func() {
 
 			inst := instrument.New(labels, metricsFetcher, &testLogger{}, writer)
 
-			// [NEW] Start/End using defer so End always runs.
+			// Start/End using defer so End always runs.
 			inst.Start(context.Background())
 			defer func() {
 				passed := !CurrentSpecReport().Failed()
@@ -360,28 +310,13 @@ var _ = Describe("Manager", Ordered, func() {
 // Token request helper (FIX: no /tmp file dependency)
 // -----------------------------------------------------------------------------
 
+// serviceAccountToken returns a token for the specified service account in the given namespace.
 func serviceAccountToken() (string, error) {
 	const tokenRequestRawString = `{
   "apiVersion": "authentication.k8s.io/v1",
   "kind": "TokenRequest"
 }`
 
-	// [OLD] file-based approach (kept for reference)
-	//
-	// secretName := fmt.Sprintf("%s-token-request", serviceAccountName)
-	// tokenRequestFile := filepath.Join("/tmp", secretName)
-	// err := os.WriteFile(tokenRequestFile, []byte(tokenRequestRawString), os.FileMode(0o644))
-	// if err != nil {
-	// 	return "", err
-	// }
-	// cmd := exec.Command("kubectl", "create", "--raw", fmt.Sprintf(
-	// 	"/api/v1/namespaces/%s/serviceaccounts/%s/token",
-	// 	namespace,
-	// 	serviceAccountName,
-	// ), "-f", tokenRequestFile)
-	// output, err := cmd.CombinedOutput()
-
-	// [NEW] stdin-based approach (no temp file, avoids "no such file" flake)
 	var out string
 	var lastErr error
 
@@ -394,6 +329,7 @@ func serviceAccountToken() (string, error) {
 
 		cmd.Stdin = strings.NewReader(tokenRequestRawString)
 
+		// Keep CombinedOutput for maximum debug value on failure.
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			lastErr = fmt.Errorf("token request failed: %s", string(output))
@@ -462,6 +398,7 @@ subjects:
 	cmd := exec.Command("kubectl", "apply", "-f", "-")
 	cmd.Stdin = strings.NewReader(yaml)
 
+	// CombinedOutput here is fine; this YAML isn't parsing-sensitive and we want debug output.
 	out, err := cmd.CombinedOutput()
 	_, _ = fmt.Fprintf(GinkgoWriter, "running: %q\n", strings.Join(cmd.Args, " "))
 	if len(out) > 0 {
@@ -482,7 +419,3 @@ type testLogger struct{}
 func (t *testLogger) Logf(format string, args ...any) {
 	_, _ = fmt.Fprintf(GinkgoWriter, format+"\n", args...)
 }
-
-// -----------------------------------------------------------------------------
-// STDOUT-only capture helper to avoid wrapper STDERR banner mixing
-// -----------------------------------------------------------------------------
