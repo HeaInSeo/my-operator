@@ -247,6 +247,36 @@ func runCmdStdout(cmd *exec.Cmd) (string, error) {
 	return string(stdoutBytes), nil
 }
 
+//func runCmdStdout(cmd *exec.Cmd) (string, error) {
+//	cmd.Env = append(os.Environ(), "GO111MODULE=on")
+//
+//	command := strings.Join(cmd.Args, " ")
+//	_, _ = fmt.Fprintf(GinkgoWriter, "running: %q\n", command)
+//
+//	stdout, err := cmd.StdoutPipe()
+//	if err != nil {
+//		return "", err
+//	}
+//	stderr, err := cmd.StderrPipe()
+//	if err != nil {
+//		return "", err
+//	}
+//
+//	if err := cmd.Start(); err != nil {
+//		return "", err
+//	}
+//
+//	b, _ := io.ReadAll(stdout)
+//	eb, _ := io.ReadAll(stderr)
+//
+//	waitErr := cmd.Wait()
+//	if waitErr != nil {
+//		return "", fmt.Errorf("%q failed: %w (stderr=%s)", command, waitErr, string(eb))
+//	}
+//
+//	return string(b), nil
+//}
+
 // Optional convenience helper: wait for curl pod completion
 func waitCurlMetricsDone(ns, podName string) {
 	Eventually(func(g Gomega) {

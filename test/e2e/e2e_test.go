@@ -17,13 +17,13 @@ limitations under the License.
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"math"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +32,7 @@ import (
 
 	"github.com/yeongki/my-operator/internal/artifacts"
 	"github.com/yeongki/my-operator/pkg/slo"
+	"github.com/yeongki/my-operator/test/e2e/instrument"
 	"github.com/yeongki/my-operator/test/utils"
 )
 
@@ -69,12 +70,12 @@ var _ = Describe("Manager", Ordered, func() {
 
 		By("labeling the namespace to enforce the security policy")
 
-		// [OLD] restricted enforce
+		// [OLD] restricted enforce (kept for reference)
 		// cmd = exec.Command("kubectl", "label", "--overwrite", "ns", namespace,
 		// 	"pod-security.kubernetes.io/enforce=restricted")
 
-		// [NEW] baseline to reduce flakiness while you are iterating
-		// - If you want to test "restricted", switch back later after making manager pod compliant.
+		// [NEW] baseline to reduce flakiness while you are iterating.
+		// - Later, when the manager pod is fully compliant, switch back to restricted.
 		cmd = exec.Command("kubectl", "label", "--overwrite", "ns", namespace,
 			"pod-security.kubernetes.io/enforce=baseline")
 		_, err = utils.Run(cmd)
@@ -99,7 +100,6 @@ var _ = Describe("Manager", Ordered, func() {
 		}
 
 		By("best-effort: cleaning up curl-metrics pods for metrics")
-		// helpers_metrics.go provides cleanupCurlMetricsPods(ns)
 		cleanupCurlMetricsPods(namespace)
 
 		By("undeploying the controller-manager")
@@ -115,13 +115,55 @@ var _ = Describe("Manager", Ordered, func() {
 		_, _ = utils.Run(cmd)
 	})
 
+	// [OLD AfterEach] (kept for reference)
+	//
+	//AfterEach(func() {
+	//	specReport := CurrentSpecReport()
+	//	if specReport.Failed() {
+	//		By("Fetching controller manager pod logs")
+	//		cmd := exec.Command("kubectl", "logs", controllerPodName, "-n", namespace)
+	//		controllerLogs, err := utils.Run(cmd)
+	//		if err == nil {
+	//			_, _ = fmt.Fprintf(GinkgoWriter, "Controller logs:\n%s\n", controllerLogs)
+	//		} else {
+	//			_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get Controller logs: %v\n", err)
+	//		}
+	//
+	//		By("Fetching Kubernetes events")
+	//		cmd = exec.Command("kubectl", "get", "events", "-n", namespace, "--sort-by=.lastTimestamp")
+	//		eventsOutput, err := utils.Run(cmd)
+	//		if err == nil {
+	//			_, _ = fmt.Fprintf(GinkgoWriter, "Kubernetes events:\n%s\n", eventsOutput)
+	//		} else {
+	//			_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get Kubernetes events: %v\n", err)
+	//		}
+	//
+	//		By("Fetching curl-metrics logs")
+	//		cmd = exec.Command("kubectl", "logs", "curl-metrics", "-n", namespace)
+	//		metricsOutput, err := utils.Run(cmd)
+	//		if err == nil {
+	//			_, _ = fmt.Fprintf(GinkgoWriter, "Metrics logs:\n%s\n", metricsOutput)
+	//		} else {
+	//			_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get curl-metrics logs: %v\n", err)
+	//		}
+	//
+	//		By("Fetching controller manager pod description")
+	//		cmd = exec.Command("kubectl", "describe", "pod", controllerPodName, "-n", namespace)
+	//		podDescription, err := utils.Run(cmd)
+	//		if err == nil {
+	//			_, _ = fmt.Fprintf(GinkgoWriter, "Pod description:\n%s\n", podDescription)
+	//		} else {
+	//			_, _ = fmt.Fprintf(GinkgoWriter, "Failed to describe controller pod: %v\n", err)
+	//		}
+	//	}
+	//})
+
 	AfterEach(func() {
 		specReport := CurrentSpecReport()
 		if !specReport.Failed() {
 			return
 		}
 
-		// [NEW] Always dump namespace events/resources even if controllerPodName is empty.
 		By("Failure dump: listing deploy/rs/pods (best-effort)")
 		cmd := exec.Command("kubectl", "get", "deploy,rs,pods", "-n", namespace, "-o", "wide")
 		if out, err := utils.Run(cmd); err == nil {
@@ -175,38 +217,16 @@ var _ = Describe("Manager", Ordered, func() {
 		It("should run successfully", func() {
 			By("validating that the controller-manager pod is running as expected")
 
-			// [OLD] jsonpath polling only
-			// - may be flaky, and can be broken by wrapped kubectl banner mixing into stdout parsing
-			// verifyControllerUp := func(g Gomega) {
-			// 	cmd := exec.Command("kubectl", "get", "pods",
-			// 		"-n", namespace,
-			// 		"-l", "control-plane=controller-manager",
-			// 		"-o", "jsonpath={.items[?(@.metadata.deletionTimestamp==null)].metadata.name}",
-			// 	)
-			// 	podName, err := utils.Run(cmd)
-			// 	g.Expect(err).NotTo(HaveOccurred(), "Failed to retrieve controller-manager pod name")
-			// 	controllerPodName = strings.TrimSpace(podName)
-			// 	g.Expect(controllerPodName).NotTo(BeEmpty(), "controller-manager pod not found yet")
-			// }
+			// [OLD] go-template version (kept for reference)
+			// verifyControllerUp := func(g Gomega) { ... }
+			// Eventually(verifyControllerUp).Should(Succeed())
 
-			// [NEW] more stable:
-			// 1) Wait rollout status for deployment
-			// 2) Fetch *first* pod name via jsonpath (stdout-only)
+			// [NEW] jsonpath + STDOUT-only capture for stable parsing with wrapped kubectl
 			verifyControllerUp := func(g Gomega) {
-				// 1) wait deployment available
-				cmd := exec.Command("kubectl", "rollout", "status",
-					"deploy/"+controllerManagerDeploymentName,
-					"-n", namespace,
-					"--timeout=120s",
-				)
-				_, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred(), "controller-manager deployment not available yet")
-
-				// 2) pick the first pod name only (avoid multi-pod concat issues)
-				cmd = exec.Command("kubectl", "get", "pods",
+				cmd := exec.Command("kubectl", "get", "pods",
 					"-n", namespace,
 					"-l", "control-plane=controller-manager",
-					"-o", "jsonpath={.items[0].metadata.name}",
+					"-o", "jsonpath={.items[?(@.metadata.deletionTimestamp==null)].metadata.name}",
 				)
 				podName, err := runCmdStdout(cmd)
 				g.Expect(err).NotTo(HaveOccurred(), "Failed to retrieve controller-manager pod name")
@@ -215,7 +235,6 @@ var _ = Describe("Manager", Ordered, func() {
 				g.Expect(controllerPodName).NotTo(BeEmpty(), "controller-manager pod not found yet")
 				g.Expect(controllerPodName).To(ContainSubstring("controller-manager"))
 
-				// 3) validate phase is Running
 				cmd = exec.Command("kubectl", "get", "pod", controllerPodName,
 					"-n", namespace,
 					"-o", "jsonpath={.status.phase}",
@@ -225,24 +244,36 @@ var _ = Describe("Manager", Ordered, func() {
 				g.Expect(strings.TrimSpace(phase)).To(Equal("Running"), "Incorrect controller-manager pod status")
 			}
 
-			Eventually(verifyControllerUp).Should(Succeed())
+			Eventually(verifyControllerUp, 5*time.Minute, 2*time.Second).Should(Succeed())
 		})
 
-		It("should ensure the metrics endpoint is serving metrics (and write sli-summary.json best-effort)", func() {
-			By("creating a ClusterRoleBinding for the service account to allow access to metrics")
-			cmd := exec.Command("kubectl", "create", "clusterrolebinding", metricsRoleBindingName,
-				"--clusterrole=my-operator-metrics-reader",
-				fmt.Sprintf("--serviceaccount=%s:%s", namespace, serviceAccountName),
-			)
-			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to create ClusterRoleBinding")
+		It("should ensure the metrics endpoint is serving metrics (with unified instrumentation)", func() {
+			// -----------------------------------------------------------
+			// 0) RBAC (idempotent apply) - avoids "already exists" on rerun
+			// -----------------------------------------------------------
 
+			// [OLD] non-idempotent create (fails on rerun: already exists)
+			// By("creating a ClusterRoleBinding for the service account to allow access to metrics")
+			// cmd := exec.Command("kubectl", "create", "clusterrolebinding", metricsRoleBindingName,
+			// 	"--clusterrole=my-operator-metrics-reader",
+			// 	fmt.Sprintf("--serviceaccount=%s:%s", namespace, serviceAccountName),
+			// )
+			// _, err := utils.Run(cmd)
+			// Expect(err).NotTo(HaveOccurred(), "Failed to create ClusterRoleBinding")
+
+			By("ensuring ClusterRoleBinding exists (idempotent apply)")
+			err := applyClusterRoleBinding(metricsRoleBindingName, "my-operator-metrics-reader", namespace, serviceAccountName)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply ClusterRoleBinding")
+
+			// -----------------------------------------------------------
+			// 1) Basic infra checks
+			// -----------------------------------------------------------
 			By("validating that the metrics service is available")
-			cmd = exec.Command("kubectl", "get", "service", metricsServiceName, "-n", namespace)
+			cmd := exec.Command("kubectl", "get", "service", metricsServiceName, "-n", namespace)
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Metrics service should exist")
 
-			By("getting the service account token")
+			By("getting the service account token (TokenRequest)")
 			token, err := serviceAccountToken()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(token).NotTo(BeEmpty())
@@ -254,7 +285,7 @@ var _ = Describe("Manager", Ordered, func() {
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(out).To(ContainSubstring("8443"), "Metrics endpoint is not ready")
 			}
-			Eventually(verifyMetricsEndpointReady).Should(Succeed())
+			Eventually(verifyMetricsEndpointReady, 5*time.Minute, 2*time.Second).Should(Succeed())
 
 			By("verifying that the controller manager is serving the metrics server")
 			verifyMetricsServerStarted := func(g Gomega) {
@@ -264,159 +295,78 @@ var _ = Describe("Manager", Ordered, func() {
 				g.Expect(out).To(ContainSubstring("controller-runtime.metrics\tServing metrics server"),
 					"Metrics server not yet started")
 			}
-			Eventually(verifyMetricsServerStarted).Should(Succeed())
+			Eventually(verifyMetricsServerStarted, 5*time.Minute, 2*time.Second).Should(Succeed())
 
-			// -------------------------------------------------------------------------
-			// [NEW] A-option: scrape metrics twice (best-effort) and write sli-summary.json
-			// - Fix #1: sanity check reuses collected logs (no extra "kubectl logs curl-metrics")
-			// - Fix #2: unique curl pod name to avoid name collisions (your helpers_metrics.go already does this)
-			// -------------------------------------------------------------------------
-			By("A-option: scraping metrics twice and writing sli-summary.json (best-effort)")
+			// -----------------------------------------------------------
+			// 2) Unified SLO Instrumentation (Start/End + best-effort summary)
+			// -----------------------------------------------------------
+			By("SLO: initializing unified instrumentation")
 
-			w := summaryWriterFromEnv()
+			metricsFetcher := func(ctx context.Context) (string, error) {
+				_ = ctx // keep signature future-proof
 
-			// --- Start snapshot ---
-			var (
-				startV    int64
-				startOK   bool
-				startLogs string
-			)
-			startPod, err := runCurlMetricsOnce(namespace, token, metricsServiceName, serviceAccountName)
-			if err != nil {
-				_, _ = fmt.Fprintf(GinkgoWriter, "[slo-lab] start runCurlMetricsOnce failed (ignored): %v\n", err)
-			} else {
-				// wait this pod to finish
+				podName, err := runCurlMetricsOnce(namespace, token, metricsServiceName, serviceAccountName)
+				if err != nil {
+					return "", err
+				}
+
+				// wait for completion (Succeeded or Failed)
 				Eventually(func(g Gomega) {
-					phase, err := curlMetricsPhase(namespace, startPod)
+					phase, err := curlMetricsPhase(namespace, podName)
 					g.Expect(err).NotTo(HaveOccurred())
 					phase = strings.TrimSpace(phase)
-					g.Expect(phase == "Succeeded" || phase == "Failed").To(BeTrue(), "curl pod not finished yet, phase=%s", phase)
+					g.Expect(phase == "Succeeded" || phase == "Failed").To(BeTrue(),
+						"curl-metrics pod not finished yet: phase=%s", phase)
 				}, 5*time.Minute, 2*time.Second).Should(Succeed())
 
-				out, err := curlMetricsLogs(namespace, startPod)
-				_ = deletePodNoWait(namespace, startPod) // best-effort
-				if err != nil {
-					_, _ = fmt.Fprintf(GinkgoWriter, "[slo-lab] start logs failed (ignored): %v\n", err)
-				} else {
-					startLogs = out
-					v, err := sumReconcileTotalFromCurlLogs(startLogs)
-					if err != nil {
-						_, _ = fmt.Fprintf(GinkgoWriter, "[slo-lab] start parse failed (ignored): %v\n", err)
-					} else {
-						startV = v
-						startOK = true
-						_, _ = fmt.Fprintf(GinkgoWriter, "[slo-lab] start reconcile_total=%d\n", startV)
-					}
-				}
+				logs, err := curlMetricsLogs(namespace, podName)
+
+				// best-effort cleanup
+				_ = deletePodNoWait(namespace, podName)
+
+				return logs, err
 			}
 
-			// --- End snapshot ---
-			var (
-				endV    int64
-				endOK   bool
-				endLogs string
-			)
-			endPod, err := runCurlMetricsOnce(namespace, token, metricsServiceName, serviceAccountName)
-			if err != nil {
-				_, _ = fmt.Fprintf(GinkgoWriter, "[slo-lab] end runCurlMetricsOnce failed (ignored): %v\n", err)
-			} else {
-				Eventually(func(g Gomega) {
-					phase, err := curlMetricsPhase(namespace, endPod)
-					g.Expect(err).NotTo(HaveOccurred())
-					phase = strings.TrimSpace(phase)
-					g.Expect(phase == "Succeeded" || phase == "Failed").To(BeTrue(), "curl pod not finished yet, phase=%s", phase)
-				}, 5*time.Minute, 2*time.Second).Should(Succeed())
+			writer := summaryWriterFromEnv()
 
-				out, err := curlMetricsLogs(namespace, endPod)
-				_ = deletePodNoWait(namespace, endPod) // best-effort
-				if err != nil {
-					_, _ = fmt.Fprintf(GinkgoWriter, "[slo-lab] end logs failed (ignored): %v\n", err)
-				} else {
-					endLogs = out
-					v, err := sumReconcileTotalFromCurlLogs(endLogs)
-					if err != nil {
-						_, _ = fmt.Fprintf(GinkgoWriter, "[slo-lab] end parse failed (ignored): %v\n", err)
-					} else {
-						endV = v
-						endOK = true
-						_, _ = fmt.Fprintf(GinkgoWriter, "[slo-lab] end reconcile_total=%d\n", endV)
-					}
-				}
+			labels := slo.Labels{
+				Suite:     "e2e",
+				TestCase:  "metrics-health",
+				Namespace: namespace,
+				RunID:     os.Getenv("CI_RUN_ID"),
 			}
 
-			// delta 계산 (best-effort)
-			var deltaF *float64
-			if startOK && endOK {
-				delta := endV - startV
-				if delta >= 0 {
-					f := float64(delta)
-					deltaF = &f
-				} else {
-					_, _ = fmt.Fprintf(GinkgoWriter, "[slo-lab] negative delta=%d (ignored)\n", delta)
-				}
-			}
+			inst := instrument.New(labels, metricsFetcher, &testLogger{}, writer)
 
-			// result 결정 (측정 실패는 skip)
-			result := "skip"
-			if startOK && endOK && deltaF != nil {
-				result = "success"
-			}
+			// [NEW] Start/End using defer so End always runs.
+			inst.Start(context.Background())
+			defer func() {
+				passed := !CurrentSpecReport().Failed()
+				inst.End(context.Background(), passed)
+			}()
 
-			// summary write (best-effort)
-			_ = w.WriteSummary(slo.Summary{
-				Labels: slo.Labels{
-					Result: result,
-				},
-				CreatedAt: time.Now().UTC(),
-				Metrics: slo.SummaryMetrics{
-					ReconcileTotalDelta: deltaF,
-				},
-			})
-			// [OLD]
-			// _, _ = fmt.Fprintf(GinkgoWriter, "[slo-lab] wrote summary: result=%s delta=%v path=%s\n", result, deltaF, w.Path)
-
-			// [NEW] print a stable delta string (no pointer printing, no panic)
-			deltaStr := "nil"
-			if deltaF != nil {
-				// If you don't want decimals, use "%.0f" or format as int64 instead.
-				v := *deltaF
-				if math.IsNaN(v) {
-					deltaStr = "NaN"
-				} else if math.IsInf(v, 1) {
-					deltaStr = "+Inf"
-				} else if math.IsInf(v, -1) {
-					deltaStr = "-Inf"
-				} else {
-					// Choose one:
-					// deltaStr = fmt.Sprintf("%.0f", v)  // looks like a counter delta (integer)
-					deltaStr = fmt.Sprintf("%f", v) // keeps float formatting
-				}
-			}
-			_, _ = fmt.Fprintf(GinkgoWriter, "[slo-lab] wrote summary: result=%s delta=%s path=%s\n", result, deltaStr, w.Path)
-			// ---------------------------------------------------------------------
-			// [FIX] Sanity: reuse collected logs (no extra pod assumption)
-			// ---------------------------------------------------------------------
-			By("sanity: ensuring metrics were actually scraped successfully (reusing collected logs)")
-			Expect(startOK || endOK).To(BeTrue(), "Failed to scrape metrics (both start and end attempts failed)")
-
-			checkLogs := endLogs
-			if !endOK {
-				checkLogs = startLogs
-			}
-			Expect(checkLogs).NotTo(BeEmpty(), "Sanity logs are empty unexpectedly")
-			Expect(checkLogs).To(ContainSubstring("controller_runtime_reconcile_total"))
+			// -----------------------------------------------------------
+			// 3) Actual assertion: ensure we can fetch metrics at least once
+			// -----------------------------------------------------------
+			By("sanity: scraping metrics once via fetcher")
+			text, err := metricsFetcher(context.Background())
+			Expect(err).NotTo(HaveOccurred(), "metrics fetcher failed")
+			Expect(text).To(ContainSubstring("controller_runtime_reconcile_total"))
 		})
 	})
 })
 
-// serviceAccountToken returns a token for the specified service account in the given namespace.
+// -----------------------------------------------------------------------------
+// Token request helper (FIX: no /tmp file dependency)
+// -----------------------------------------------------------------------------
+
 func serviceAccountToken() (string, error) {
 	const tokenRequestRawString = `{
-		"apiVersion": "authentication.k8s.io/v1",
-		"kind": "TokenRequest"
-	}`
+  "apiVersion": "authentication.k8s.io/v1",
+  "kind": "TokenRequest"
+}`
 
-	// [OLD] write JSON to /tmp and pass -f <file>
+	// [OLD] file-based approach (kept for reference)
 	//
 	// secretName := fmt.Sprintf("%s-token-request", serviceAccountName)
 	// tokenRequestFile := filepath.Join("/tmp", secretName)
@@ -424,87 +374,50 @@ func serviceAccountToken() (string, error) {
 	// if err != nil {
 	// 	return "", err
 	// }
-	//
-	// var out string
-	// verifyTokenCreation := func(g Gomega) {
-	// 	cmd := exec.Command("kubectl", "create", "--raw", fmt.Sprintf(
-	// 		"/api/v1/namespaces/%s/serviceaccounts/%s/token",
-	// 		namespace,
-	// 		serviceAccountName,
-	// 	), "-f", tokenRequestFile)
-	//
-	// 	output, err := cmd.CombinedOutput()
-	// 	g.Expect(err).NotTo(HaveOccurred())
-	//
-	// 	var token tokenRequest
-	// 	err = json.Unmarshal(output, &token)
-	// 	g.Expect(err).NotTo(HaveOccurred())
-	//
-	// 	out = token.Status.Token
-	// }
-	// Eventually(verifyTokenCreation).Should(Succeed())
-	// return out, err
+	// cmd := exec.Command("kubectl", "create", "--raw", fmt.Sprintf(
+	// 	"/api/v1/namespaces/%s/serviceaccounts/%s/token",
+	// 	namespace,
+	// 	serviceAccountName,
+	// ), "-f", tokenRequestFile)
+	// output, err := cmd.CombinedOutput()
 
-	// [NEW] No temp file: feed JSON via STDIN using "-f -"
-	// - Fixes: "open /tmp/... no such file" in containerized / wrapped kubectl setups.
+	// [NEW] stdin-based approach (no temp file, avoids "no such file" flake)
 	var out string
 	var lastErr error
 
 	verifyTokenCreation := func(g Gomega) {
-		endpoint := fmt.Sprintf("/api/v1/namespaces/%s/serviceaccounts/%s/token",
-			namespace, serviceAccountName)
+		cmd := exec.Command("kubectl", "create", "--raw", fmt.Sprintf(
+			"/api/v1/namespaces/%s/serviceaccounts/%s/token",
+			namespace,
+			serviceAccountName,
+		), "-f", "-")
 
-		cmd := exec.Command("kubectl", "create", "--raw", endpoint, "-f", "-")
-
-		// stdin = TokenRequest JSON
 		cmd.Stdin = strings.NewReader(tokenRequestRawString)
 
-		// stdout/stderr capture (wrapper banner often goes to stderr)
-		b, err := cmd.CombinedOutput()
+		output, err := cmd.CombinedOutput()
 		if err != nil {
-			lastErr = fmt.Errorf("token request failed: %w: %s", err, string(b))
-			g.Expect(err).NotTo(HaveOccurred(), lastErr.Error())
+			lastErr = fmt.Errorf("token request failed: %s", string(output))
+			g.Expect(err).NotTo(HaveOccurred())
 			return
 		}
 
-		// If wrapper ever pollutes stdout, try to salvage JSON by slicing from first '{'
-		payload := extractJSONBestEffort(string(b))
-
 		var token tokenRequest
-		err = json.Unmarshal([]byte(payload), &token)
-		if err != nil {
-			lastErr = fmt.Errorf("token json unmarshal failed: %w: raw=%q", err, string(b))
-			g.Expect(err).NotTo(HaveOccurred(), lastErr.Error())
+		if err := json.Unmarshal(output, &token); err != nil {
+			lastErr = fmt.Errorf("token response json parse failed: %w (body=%s)", err, string(output))
+			g.Expect(err).NotTo(HaveOccurred())
 			return
 		}
 
 		out = token.Status.Token
-		lastErr = nil
 		g.Expect(out).NotTo(BeEmpty(), "token is empty")
 	}
 
-	Eventually(verifyTokenCreation).Should(Succeed())
+	Eventually(verifyTokenCreation, 2*time.Minute, 2*time.Second).Should(Succeed())
 
 	if out == "" && lastErr != nil {
 		return "", lastErr
 	}
 	return out, nil
-}
-
-// extractJSONBestEffort extract JSON object best-effort from mixed output.
-// - If output is clean JSON, returns as-is.
-// - If wrapper banner leaked into stdout, tries to slice from first '{' to last '}'.
-func extractJSONBestEffort(s string) string {
-	ss := strings.TrimSpace(s)
-	if strings.HasPrefix(ss, "{") && strings.HasSuffix(ss, "}") {
-		return ss
-	}
-	i := strings.Index(ss, "{")
-	j := strings.LastIndex(ss, "}")
-	if i >= 0 && j > i {
-		return ss[i : j+1]
-	}
-	return ss
 }
 
 type tokenRequest struct {
@@ -513,49 +426,9 @@ type tokenRequest struct {
 	} `json:"status"`
 }
 
-func sumReconcileTotalFromCurlLogs(curlLogs string) (int64, error) {
-	const metricName = "controller_runtime_reconcile_total"
-
-	lines := strings.Split(curlLogs, "\n")
-	var (
-		sum   int64
-		found bool
-	)
-
-	for _, raw := range lines {
-		ln := strings.TrimSpace(raw)
-		if ln == "" {
-			continue
-		}
-
-		// curl verbose prefixes (if present)
-		ln = strings.TrimPrefix(ln, "< ")
-		ln = strings.TrimPrefix(ln, "> ")
-		ln = strings.TrimSpace(ln)
-
-		if strings.HasPrefix(ln, "#") {
-			continue
-		}
-
-		if strings.HasPrefix(ln, metricName+"{") || strings.HasPrefix(ln, metricName+" ") {
-			fields := strings.Fields(ln)
-			if len(fields) < 2 {
-				continue
-			}
-			v, err := strconv.ParseFloat(fields[1], 64)
-			if err != nil {
-				continue
-			}
-			sum += int64(v)
-			found = true
-		}
-	}
-
-	if !found {
-		return 0, fmt.Errorf("metric not found in curl logs: %s", metricName)
-	}
-	return sum, nil
-}
+// -----------------------------------------------------------------------------
+// Summary writer helper
+// -----------------------------------------------------------------------------
 
 func summaryWriterFromEnv() artifacts.JSONFileWriter {
 	dir := os.Getenv("ARTIFACTS_DIR")
@@ -566,3 +439,50 @@ func summaryWriterFromEnv() artifacts.JSONFileWriter {
 		Path: filepath.Join(dir, "sli-summary.json"),
 	}
 }
+
+// -----------------------------------------------------------------------------
+// Idempotent ClusterRoleBinding helper
+// -----------------------------------------------------------------------------
+
+func applyClusterRoleBinding(name, clusterRole, ns, sa string) error {
+	yaml := fmt.Sprintf(`apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: %s
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: %s
+subjects:
+- kind: ServiceAccount
+  name: %s
+  namespace: %s
+`, name, clusterRole, sa, ns)
+
+	cmd := exec.Command("kubectl", "apply", "-f", "-")
+	cmd.Stdin = strings.NewReader(yaml)
+
+	out, err := cmd.CombinedOutput()
+	_, _ = fmt.Fprintf(GinkgoWriter, "running: %q\n", strings.Join(cmd.Args, " "))
+	if len(out) > 0 {
+		_, _ = fmt.Fprintf(GinkgoWriter, "%s\n", string(out))
+	}
+	if err != nil {
+		return fmt.Errorf("kubectl apply clusterrolebinding failed: %w", err)
+	}
+	return nil
+}
+
+// -----------------------------------------------------------------------------
+// Logger adapter for instrument
+// -----------------------------------------------------------------------------
+
+type testLogger struct{}
+
+func (t *testLogger) Logf(format string, args ...any) {
+	_, _ = fmt.Fprintf(GinkgoWriter, format+"\n", args...)
+}
+
+// -----------------------------------------------------------------------------
+// STDOUT-only capture helper to avoid wrapper STDERR banner mixing
+// -----------------------------------------------------------------------------

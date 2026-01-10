@@ -1,201 +1,211 @@
+// internal/instrument/instrument.go
 package instrument
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
-	"os"
+	"strings"
 	"time"
 
-	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
+
 	"github.com/yeongki/my-operator/pkg/slo"
 )
 
-type Result string
+// MetricsFetcher defines how to get raw Prometheus metrics text.
+// test/e2e will provide an implementation (kubectl run curl pod -> logs).
+type MetricsFetcher func(ctx context.Context) (string, error)
 
-const (
-	ResultSuccess Result = "success"
-	ResultFail    Result = "fail"
-	ResultSkip    Result = "skip"
-)
-
+// Instrument is a unified E2E instrumentation helper.
+//
+// Rules:
+// - Best-effort: measurement failure MUST NOT fail tests.
+// - "testPassed" is the source of truth for success/fail.
+// - If testPassed=true but measurement missing => result=skip.
 type Instrument struct {
 	enabled bool
+	fetcher MetricsFetcher
+	logf    func(string, ...any)
+	writer  slo.SummaryWriter
 
-	metricsURL string
-	httpClient *http.Client
+	labels slo.Labels
 
-	logf   func(string, ...any)
-	writer slo.SummaryWriter
-
-	labels    slo.Labels
 	startTime time.Time
 	hasStart  bool
 
+	// "A-option" like counter snapshot
 	reconcileStart int64
 	hasRecStart    bool
+
+	// configurable names (keep simple for now)
+	reconcileTotalMetricName string
+
+	// last error context (optional)
+	lastFetchErr error
+	lastParseErr error
 }
 
 type Option func(*Instrument)
 
-func WithLogger(l slo.Logger) Option {
-	return func(i *Instrument) { i.logf = func(format string, args ...any) { l.Logf(format, args...) } }
+// WithReconcileTotalMetricName overrides the default metric name.
+func WithReconcileTotalMetricName(name string) Option {
+	return func(i *Instrument) {
+		if strings.TrimSpace(name) != "" {
+			i.reconcileTotalMetricName = name
+		}
+	}
 }
 
-func WithWriter(w slo.SummaryWriter) Option {
-	return func(i *Instrument) { i.writer = w }
-}
-
-func WithHTTPClient(c *http.Client) Option {
-	return func(i *Instrument) { i.httpClient = c }
-}
-
-// New creates a glue-layer instrument.
-// - env reading happens ONLY here (glue), not in pkg/slo.
-func New(labels slo.Labels, metricsURL string, opts ...Option) *Instrument {
+// New creates a unified instrument.
+// It checks slo.Enabled() automatically.
+//
+// NOTE: Keep this package "test oriented":
+// - Do NOT import kubernetes/client-go/controller-runtime here.
+// - Fetcher is injected from tests.
+func New(labels slo.Labels, fetcher MetricsFetcher, logger slo.Logger, writer slo.SummaryWriter, opts ...Option) *Instrument {
 	i := &Instrument{
-		enabled:    os.Getenv("SLO_ENABLED") == "1", // 문서의 opt-in 이름을 여기서만 결정
-		metricsURL: metricsURL,
-		httpClient: &http.Client{Timeout: 2 * time.Second},
-		logf:       func(string, ...any) {},
-		labels:     labels,
+		enabled:                  slo.Enabled(), // Rule A: Opt-in
+		fetcher:                  fetcher,
+		labels:                   labels,
+		logf:                     func(string, ...any) {},
+		writer:                   writer,
+		reconcileTotalMetricName: "controller_runtime_reconcile_total",
 	}
-	for _, o := range opts {
-		o(i)
+
+	if logger != nil {
+		i.logf = logger.Logf
 	}
+
+	for _, opt := range opts {
+		if opt != nil {
+			opt(i)
+		}
+	}
+
 	return i
 }
 
-func (i *Instrument) Enabled() bool { return i.enabled }
-
-func (i *Instrument) Start(now time.Time) {
+// Start records the start time and initial metrics snapshot.
+// Best-effort: any failure means we skip delta later.
+func (i *Instrument) Start(ctx context.Context) {
 	if !i.enabled {
 		return
 	}
-	i.startTime = now
+	i.startTime = time.Now()
 	i.hasStart = true
 
-	// 시작 스냅샷: controller_runtime_reconcile_total
-	v, err := i.scrapeCounter(context.Background(), "controller_runtime_reconcile_total",
-		map[string]string{
-			// controller label은 네 프로젝트에 맞춰 주입 가능 (예: joboperator)
-			// 필요 없으면 이 map을 비워도 됨. 대신 여러 컨트롤러 합산될 수 있음.
-			"controller": "joboperator",
-		},
-	)
+	// Snapshot reconcile_total at start (best-effort)
+	if i.fetcher == nil {
+		i.logf("[slo-lab] Start: missing fetcher (skip metrics delta)")
+		return
+	}
+
+	text, err := i.fetcher(ctx)
 	if err != nil {
-		i.logf("[slo-lab] start: skip reconcile snapshot: %v", err)
+		i.lastFetchErr = err
+		i.logf("[slo-lab] Start: fetch failed (skip metrics delta): %v", err)
+		return
+	}
+
+	v, err := parseCounterSum(text, i.reconcileTotalMetricName)
+	if err != nil {
+		i.lastParseErr = err
+		i.logf("[slo-lab] Start: parse failed (skip metrics delta): %v", err)
 		return
 	}
 
 	i.reconcileStart = v
 	i.hasRecStart = true
-	i.logf("[slo-lab] start: reconcile_total=%d", v)
+	i.logf("[slo-lab] Start: %s=%d", i.reconcileTotalMetricName, v)
 }
 
-func (i *Instrument) End(now time.Time, testPassed bool) {
+// End records the end time, final metrics snapshot, and writes the summary.
+// testPassed: result of the actual test assertion.
+func (i *Instrument) End(ctx context.Context, testPassed bool) {
 	if !i.enabled {
 		return
 	}
+	now := time.Now()
 
-	// 1) result 라벨 결정 (테스트 결과가 우선)
-	result := string(ResultSuccess)
-	if !testPassed {
-		result = string(ResultFail)
-	}
-	labels := i.labels
-	labels.Result = result
-
-	// 2) convergence 계산
+	// 1) Convergence time (best-effort)
 	var convSeconds *float64
 	if i.hasStart {
-		d := now.Sub(i.startTime)
-		if d >= 0 {
-			v := d.Seconds()
-			convSeconds = &v
-		} else {
-			i.logf("[slo-lab] end: negative duration, skip convergence")
-		}
+		d := now.Sub(i.startTime).Seconds()
+		convSeconds = &d
 	} else {
-		i.logf("[slo-lab] end: missing startTime, skip convergence")
+		i.logf("[slo-lab] End: missing start time (skip convergence)")
 	}
 
-	// 3) reconcile delta 계산
+	// 2) Reconcile delta (best-effort)
 	var deltaVal *float64
-	if i.hasRecStart {
-		endV, err := i.scrapeCounter(context.Background(), "controller_runtime_reconcile_total",
-			map[string]string{"controller": "joboperator"},
-		)
+	if i.hasRecStart && i.fetcher != nil {
+		text, err := i.fetcher(ctx)
 		if err != nil {
-			i.logf("[slo-lab] end: skip reconcile snapshot(end): %v", err)
+			i.lastFetchErr = err
+			i.logf("[slo-lab] End: fetch failed (skip delta): %v", err)
 		} else {
-			delta := endV - i.reconcileStart
-			if delta >= 0 {
-				f := float64(delta)
-				deltaVal = &f
+			endV, err := parseCounterSum(text, i.reconcileTotalMetricName)
+			if err != nil {
+				i.lastParseErr = err
+				i.logf("[slo-lab] End: parse failed (skip delta): %v", err)
 			} else {
-				i.logf("[slo-lab] end: negative delta=%d, skip", delta)
+				d := float64(endV - i.reconcileStart)
+
+				// [NEW] negative delta policy (common when process restarts / metrics reset)
+				// - treat as missing => skip
+				if d < 0 {
+					i.logf("[slo-lab] End: negative delta=%s (skip delta)", fmt.Sprintf("%.0f", d))
+				} else {
+					deltaVal = &d
+					i.logf("[slo-lab] End: %s end=%d delta=%s",
+						i.reconcileTotalMetricName, endV, formatPtrFloat(deltaVal))
+				}
 			}
 		}
-	} else {
-		i.logf("[slo-lab] end: missing reconcileStart, skip delta")
+	} else if !i.hasRecStart {
+		i.logf("[slo-lab] End: missing start snapshot (skip delta)")
 	}
 
-	// 4) “측정 실패 ≠ 테스트 실패” 규칙 적용:
-	// 테스트는 성공했지만 계측이 하나라도 안 됐으면 result=skip 으로 기록(문서 규칙)
-	if testPassed {
-		if convSeconds == nil || deltaVal == nil {
-			labels.Result = string(ResultSkip)
-		}
+	// 3) Determine Result (Rule B: measurement failure != test failure)
+	finalResult := "success"
+	if !testPassed {
+		finalResult = "fail"
+	} else if convSeconds == nil || deltaVal == nil {
+		finalResult = "skip"
+	}
+	i.labels.Result = finalResult
+
+	// 4) Write Summary (best-effort)
+	if i.writer == nil {
+		i.logf("[slo-lab] End: writer is nil (skip writing summary) result=%s conv=%s delta=%s",
+			finalResult, formatPtrFloat(convSeconds), formatPtrFloat(deltaVal))
+		return
 	}
 
-	// 5) summary 작성 (writer 실패는 로그만)
-	s := slo.Summary{
-		Labels:    labels,
-		CreatedAt: time.Now().UTC(),
+	summary := slo.Summary{
+		Labels:    i.labels,
+		CreatedAt: now.UTC(),
 		Metrics: slo.SummaryMetrics{
 			E2EConvergenceTimeSeconds: convSeconds,
 			ReconcileTotalDelta:       deltaVal,
 		},
 	}
 
-	if i.writer != nil {
-		if err := i.writer.WriteSummary(s); err != nil {
-			i.logf("[slo-lab] write summary failed (ignored): %v", err)
-		}
+	if err := i.writer.WriteSummary(summary); err != nil {
+		i.logf("[slo-lab] End: write summary failed (ignored): %v", err)
+		return
 	}
+
+	i.logf("[slo-lab] wrote summary: result=%s conv=%s delta=%s",
+		finalResult, formatPtrFloat(convSeconds), formatPtrFloat(deltaVal))
 }
 
-// scrapeCounter scrapes Prometheus text exposition and extracts a counter value.
-// labelMatch: metric의 label key/value가 모두 일치하는 항목을 고름.
-//   - 매칭되는 항목이 여러 개면 “합산”해버리면 위험하니 여기서는 에러로 둔다.
-//     (원하면 나중에 “합산 모드” 옵션을 추가)
-func (i *Instrument) scrapeCounter(ctx context.Context, metricName string, labelMatch map[string]string) (int64, error) {
-	if i.metricsURL == "" {
-		return 0, errors.New("metricsURL is empty")
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, i.metricsURL, nil)
+// parseCounterSum parses Prometheus text format and sums all series of a counter metric.
+func parseCounterSum(text string, metricName string) (int64, error) {
+	parser := expfmt.TextParser{}
+	families, err := parser.TextToMetricFamilies(strings.NewReader(text))
 	if err != nil {
-		return 0, err
-	}
-
-	resp, err := i.httpClient.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode/100 != 2 {
-		return 0, fmt.Errorf("metrics http status=%s", resp.Status)
-	}
-
-	var parser expfmt.TextParser
-	families, err := parser.TextToMetricFamilies(resp.Body)
-	if err != nil {
-		return 0, fmt.Errorf("parse metrics: %w", err)
+		return 0, fmt.Errorf("text parse failed: %w", err)
 	}
 
 	mf, ok := families[metricName]
@@ -203,45 +213,28 @@ func (i *Instrument) scrapeCounter(ctx context.Context, metricName string, label
 		return 0, fmt.Errorf("metric not found: %s", metricName)
 	}
 
-	// counter는 dto.Metric의 Counter.GetValue()를 본다
-	var matched []*dto.Metric
-	for _, m := range mf.Metric {
-		if labelsMatch(m, labelMatch) {
-			matched = append(matched, m)
+	var sum float64
+	for _, m := range mf.GetMetric() {
+		// Prefer counter; tolerate gauge-like exposition in some cases.
+		if c := m.GetCounter(); c != nil {
+			sum += c.GetValue()
+			continue
+		}
+		if g := m.GetGauge(); g != nil {
+			sum += g.GetValue()
+			continue
 		}
 	}
 
-	if len(matched) == 0 {
-		return 0, fmt.Errorf("metric found but no series matched labels: %s %+v", metricName, labelMatch)
-	}
-	if len(matched) > 1 {
-		return 0, fmt.Errorf("multiple series matched labels: %s %+v (n=%d)", metricName, labelMatch, len(matched))
-	}
-
-	c := matched[0].GetCounter()
-	if c == nil {
-		// controller_runtime_reconcile_total 는 counter가 맞아야 정상
-		return 0, fmt.Errorf("metric is not counter: %s", metricName)
-	}
-	v := c.GetValue()
-	if v < 0 {
-		return 0, fmt.Errorf("counter negative: %f", v)
-	}
-	return int64(v), nil
+	return int64(sum), nil
 }
 
-func labelsMatch(m *dto.Metric, want map[string]string) bool {
-	if len(want) == 0 {
-		return true
+// formatPtrFloat is a safe formatter for *float64.
+// - nil => "nil"
+// - non-nil => "%.6f"
+func formatPtrFloat(p *float64) string {
+	if p == nil {
+		return "nil"
 	}
-	got := map[string]string{}
-	for _, lp := range m.Label {
-		got[lp.GetName()] = lp.GetValue()
-	}
-	for k, v := range want {
-		if got[k] != v {
-			return false
-		}
-	}
-	return true
+	return fmt.Sprintf("%.6f", *p)
 }
