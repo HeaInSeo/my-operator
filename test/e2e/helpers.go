@@ -1,6 +1,8 @@
 package e2e
 
-import "time"
+import (
+	"time"
+)
 
 const testStartTimeAnnoKey = "test/start-time"
 

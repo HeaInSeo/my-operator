@@ -1,4 +1,3 @@
-// internal/instrument/instrument.go
 package instrument
 
 import (
@@ -37,7 +36,29 @@ type Instrument struct {
 	reconcileStart int64
 	hasRecStart    bool
 
-	// configurable names (keep simple for now)
+	// TODO(next): Enhance metric support beyond a single counter.
+	//
+	// Current limitation:
+	//   Only supports 'reconcileTotalMetricName'. Adding more metrics (e.g., workqueue depth)
+	//   directly here risks turning Instrument into a "god object".
+	//
+	// Proposed patterns:
+	//   (A) Metric Specs (data-driven):
+	//       - Define []CounterDeltaSpec{Name, Key}
+	//       - Store start snapshots in map[name]int64
+	//       - End computes delta (end-start) for each spec
+	//       Best when logic is identical (simple counters).
+	//
+	//   (B) Pluggable Collectors (interface-driven):
+	//       - Define a Collector interface for metrics with different logic (gauge/histogram, etc.)
+	//         e.g. Start(text) error; End(text) (key string, val *float64, err error)
+	//       - Instrument owns lifecycle + best-effort policy, collectors own parsing/logic.
+	//       Best when metrics require different extraction logic.
+	//
+	// Integration note:
+	//   - Summary output may need a flexible container for dynamic metrics
+	//     (e.g., SummaryMetrics.Extra map[string]*float64, or Summary.Extras).
+	//   - Keep strict dependency boundaries: no k8s/controller-runtime imports in this package.
 	reconcileTotalMetricName string
 
 	// last error context (optional)
@@ -48,6 +69,7 @@ type Instrument struct {
 type Option func(*Instrument)
 
 // WithReconcileTotalMetricName overrides the default metric name.
+// TODO(next): replace single metric override with multi-spec counters or measurement plugins.
 func WithReconcileTotalMetricName(name string) Option {
 	return func(i *Instrument) {
 		if strings.TrimSpace(name) != "" {

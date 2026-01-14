@@ -28,17 +28,21 @@ import (
 )
 
 const (
-	prometheusOperatorVersion = "v0.77.1"
-	prometheusOperatorURL     = "https://github.com/prometheus-operator/prometheus-operator/" +
-		"releases/download/%s/bundle.yaml"
-
 	certmanagerVersion = "v1.16.3"
 	certmanagerURLTmpl = "https://github.com/cert-manager/cert-manager/releases/download/%s/cert-manager.yaml"
 )
 
-func warnError(err error) {
-	_, _ = fmt.Fprintf(GinkgoWriter, "warning: %v\n", err)
+func certmanagerURL() string {
+	return fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
 }
+
+// TODO: Refactor utils package to remove dependency on Ginkgo (GinkgoWriter).
+// Currently, this package is coupled with Ginkgo, making it unusable in non-test environments.
+//
+// Future Plan:
+// 1. Remove `import . "github.com/onsi/ginkgo/v2"`
+// 2. Modify Run() to accept an io.Writer interface for logging, or remove logging responsibility.
+//    e.g., func Run(cmd *exec.Cmd, logger io.Writer) (string, error)
 
 // Run executes the provided command within this context.
 // - On success: returns STDOUT only (important for jsonpath/go-template parsing)
@@ -80,62 +84,17 @@ func Run(cmd *exec.Cmd) (string, error) {
 	return outStr, nil
 }
 
-// InstallPrometheusOperator installs the prometheus Operator to be used to export the enabled metrics.
-func InstallPrometheusOperator() error {
-	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion)
-	cmd := exec.Command("kubectl", "create", "-f", url)
+// UninstallCertManager uninstalls the cert manager
+func UninstallCertManager() error {
+	url := certmanagerURL()
+	cmd := exec.Command("kubectl", "delete", "-f", url)
 	_, err := Run(cmd)
 	return err
 }
 
-// UninstallPrometheusOperator uninstalls the prometheus
-func UninstallPrometheusOperator() {
-	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion)
-	cmd := exec.Command("kubectl", "delete", "-f", url)
-	if _, err := Run(cmd); err != nil {
-		warnError(err)
-	}
-}
-
-// IsPrometheusCRDsInstalled checks if any Prometheus CRDs are installed
-// by verifying the existence of key CRDs related to Prometheus.
-func IsPrometheusCRDsInstalled() bool {
-	// List of common Prometheus CRDs
-	prometheusCRDs := []string{
-		"prometheuses.monitoring.coreos.com",
-		"prometheusrules.monitoring.coreos.com",
-		"prometheusagents.monitoring.coreos.com",
-	}
-
-	cmd := exec.Command("kubectl", "get", "crds", "-o", "custom-columns=NAME:.metadata.name")
-	output, err := Run(cmd)
-	if err != nil {
-		return false
-	}
-	crdList := GetNonEmptyLines(output)
-	for _, crd := range prometheusCRDs {
-		for _, line := range crdList {
-			if strings.Contains(line, crd) {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-// UninstallCertManager uninstalls the cert manager
-func UninstallCertManager() {
-	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
-	cmd := exec.Command("kubectl", "delete", "-f", url)
-	if _, err := Run(cmd); err != nil {
-		warnError(err)
-	}
-}
-
 // InstallCertManager installs the cert manager bundle.
 func InstallCertManager() error {
-	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
+	url := certmanagerURL()
 	cmd := exec.Command("kubectl", "apply", "-f", url)
 	if _, err := Run(cmd); err != nil {
 		return err
@@ -147,7 +106,6 @@ func InstallCertManager() error {
 		"--namespace", "cert-manager",
 		"--timeout", "5m",
 	)
-
 	_, err := Run(cmd)
 	return err
 }
@@ -200,14 +158,16 @@ func LoadImageToKindClusterWithName(name string) error {
 // GetNonEmptyLines converts given command output string into individual objects
 // according to line breakers, and ignores the empty elements in it.
 func GetNonEmptyLines(output string) []string {
-	var res []string
-	elements := strings.Split(output, "\n")
-	for _, element := range elements {
-		if element != "" {
-			res = append(res, element)
+	lines := strings.Split(output, "\n")
+	// var res []string 이거보다 아래와 같이 초기호 하는 것이 성능에 유리함.
+	res := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
 		}
+		res = append(res, line)
 	}
-
 	return res
 }
 
@@ -220,6 +180,12 @@ func GetProjectDir() (string, error) {
 	wd = strings.ReplaceAll(wd, "/test/e2e", "")
 	return wd, nil
 }
+
+// TODO(seoyhaein): This helper seems to be scaffolded for optional e2e flows
+// that patch manifests by uncommenting blocks (e.g., enabling prometheus/operator integration).
+// In our current e2e design, we avoid mutating repo files during tests (external scrape + sli-summary.json).
+// If this function is not referenced anywhere (grep -R "UncommentCode(" -n), consider removing it.
+// Please confirm if you intended to use it for any future integration tests before deletion.
 
 // UncommentCode searches for target in the file and remove the comment prefix
 // of the target content. The target content may span multiple lines.

@@ -1,0 +1,75 @@
+package utils
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+)
+
+// TODO 일단, PromOp 는 일단 빼놓았음. 일단 있는 코드라서 따로 빼놓았으며,
+// 향후, 테스트 운영쪽에서 PromOp 를 사용할때 사용할 수 있도록 일단 흔적만 남겨 놓았음.
+const promOperatorEnv = "PROM_OPERATOR_E2E"
+
+// PrometheusOperatorEnabled reports whether advanced Prometheus Operator integration is enabled.
+func PrometheusOperatorEnabled() bool {
+	return os.Getenv(promOperatorEnv) == "1"
+}
+
+const (
+	prometheusOperatorVersion = "v0.77.1"
+	prometheusOperatorURLTmpl = "https://github.com/prometheus-operator/prometheus-operator/releases/download/%s/bundle.yaml"
+
+	//prometheusOperatorURL = "https://github.com/prometheus-operator/prometheus-operator/" +
+	//	"releases/download/%s/bundle.yaml"
+)
+
+func prometheusOperatorURL() string {
+	return fmt.Sprintf(prometheusOperatorURLTmpl, prometheusOperatorVersion)
+}
+
+// InstallPrometheusOperator installs Prometheus Operator bundle (optional, for advanced integration tests).
+func InstallPrometheusOperator() error {
+	if !PrometheusOperatorEnabled() {
+		return fmt.Errorf("%s is not enabled", promOperatorEnv)
+	}
+	url := prometheusOperatorURL()
+	cmd := exec.Command("kubectl", "apply", "-f", url) // create -> apply (idempotent)
+	_, err := Run(cmd)
+	return err
+}
+
+// UninstallPrometheusOperator uninstalls the prometheus
+func UninstallPrometheusOperator() error {
+	url := prometheusOperatorURL()
+	cmd := exec.Command("kubectl", "delete", "-f", url, "--ignore-not-found=true")
+	_, err := Run(cmd)
+	return err
+}
+
+// IsPrometheusCRDsInstalled checks if any Prometheus CRDs are installed
+// by verifying the existence of key CRDs related to Prometheus.
+func IsPrometheusCRDsInstalled() bool {
+	// List of common Prometheus CRDs
+	prometheusCRDs := []string{
+		"prometheuses.monitoring.coreos.com",
+		"prometheusrules.monitoring.coreos.com",
+		"prometheusagents.monitoring.coreos.com",
+	}
+
+	cmd := exec.Command("kubectl", "get", "crds", "-o", "custom-columns=NAME:.metadata.name")
+	output, err := Run(cmd)
+	if err != nil {
+		return false
+	}
+	crdList := GetNonEmptyLines(output)
+	for _, crd := range prometheusCRDs {
+		for _, line := range crdList {
+			if strings.Contains(line, crd) {
+				return true
+			}
+		}
+	}
+
+	return false
+}

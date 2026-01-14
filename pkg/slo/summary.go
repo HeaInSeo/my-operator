@@ -12,6 +12,14 @@ type SummaryWriter interface {
 type SummaryMetrics struct {
 	E2EConvergenceTimeSeconds *float64 `json:"e2e_convergence_time_seconds,omitempty"`
 	ReconcileTotalDelta       *float64 `json:"reconcile_total_delta,omitempty"`
+
+	// TODO(next): support dynamic/optional metrics without adding new struct fields each time.
+	// Options:
+	//   - Extra map[string]*float64 `json:"extra,omitempty"`          // numeric-only, simplest
+	//   - Extra map[string]any      `json:"extra,omitempty"`          // allow strings/structs (careful with stability)
+	// Note:
+	//   - Keep JSON schema stable for CI consumers.
+	//   - Maintain best-effort semantics: missing metrics => omit fields.
 }
 
 type Summary struct {
