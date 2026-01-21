@@ -5,15 +5,16 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/yeongki/my-operator/pkg/slo"
 	"github.com/yeongki/my-operator/pkg/slo/fetch"
 	"github.com/yeongki/my-operator/pkg/slo/spec"
 	"github.com/yeongki/my-operator/pkg/slo/summary"
 )
 
 // Logger keeps pkg/slo independent from klog/logr.
-type Logger interface {
-	Logf(format string, args ...any)
-}
+//type Logger interface {
+//	Logf(format string, args ...any)
+//}
 
 type Engine struct {
 	fetcher fetch.MetricsFetcher
@@ -23,7 +24,7 @@ type Engine struct {
 	logf   func(string, ...any)
 }
 
-func New(fetcher fetch.MetricsFetcher, writer summary.Writer, l Logger) *Engine {
+func New(fetcher fetch.MetricsFetcher, writer summary.Writer, l slo.Logger) *Engine {
 	logf := func(string, ...any) {}
 	if l != nil {
 		logf = l.Logf

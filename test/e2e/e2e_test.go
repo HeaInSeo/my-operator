@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -9,9 +10,10 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/yeongki/my-operator/pkg/devutil"
+	"github.com/yeongki/my-operator/pkg/kubeutil"
 	"github.com/yeongki/my-operator/test/e2e/harness"
 	e2eenv "github.com/yeongki/my-operator/test/e2e/internal/env"
-	"github.com/yeongki/my-operator/test/utils"
 )
 
 const namespace = "my-operator-system"
@@ -20,45 +22,57 @@ const metricsServiceName = "my-operator-controller-manager-metrics-service"
 
 var _ = Describe("Manager", Ordered, func() {
 	var (
-		cfg   e2eenv.Options
-		token string
+		cfg     e2eenv.Options
+		token   string
+		rootDir string
 	)
 
 	BeforeAll(func() {
 		cfg = e2eenv.LoadOptions()
 		By(fmt.Sprintf("ArtifactsDir=%q RunID=%q Enabled=%v", cfg.ArtifactsDir, cfg.RunID, cfg.Enabled))
 
-		By("creating manager namespace")
-		cmd := exec.Command("kubectl", "create", "ns", namespace)
-		_, err := utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
+		var err error
+		rootDir, err = devutil.GetProjectDir()
+		Expect(err).NotTo(HaveOccurred())
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+
+		run := func(cmd *exec.Cmd, msg string) string {
+			cmd.Dir = rootDir
+			out, err := runner.Run(ctx, logger, cmd)
+			Expect(err).NotTo(HaveOccurred(), msg)
+			return out
+		}
+
+		By("creating manager namespace (idempotent)")
+		// kubectl create ns can fail if already exists; we prefer apply-ish semantics.
+		// Use: kubectl get ns || kubectl create ns
+		cmd := exec.Command("bash", "-lc", fmt.Sprintf(`kubectl get ns %s >/dev/null 2>&1 || kubectl create ns %s`, namespace, namespace))
+		run(cmd, "Failed to create namespace")
 
 		By("labeling the namespace to enforce the security policy")
 		cmd = exec.Command("kubectl", "label", "--overwrite", "ns", namespace,
 			"pod-security.kubernetes.io/enforce=baseline")
-		_, err = utils.Run(cmd)
+		_, err = runner.Run(ctx, logger, cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to label namespace with security policy")
 
 		By("installing CRDs")
 		cmd = exec.Command("make", "install")
-		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to install CRDs")
+		run(cmd, "Failed to install CRDs")
 
 		By("deploying the controller-manager")
 		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", projectImage))
-		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
+		run(cmd, "Failed to deploy the controller-manager")
 
-		By("ensuring metrics reader RBAC for controller-manager SA")
-		cmd = exec.Command("bash", "-lc", fmt.Sprintf(`
-set -euo pipefail
-kubectl create clusterrolebinding my-operator-e2e-metrics-reader \
-  --clusterrole=my-operator-metrics-reader \
-  --serviceaccount=%s:%s \
-  --dry-run=client -o yaml | kubectl apply -f -
-`, namespace, serviceAccountName))
-		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred())
+		By("ensuring metrics reader RBAC for controller-manager SA (idempotent)")
+		Expect(kubeutil.ApplyClusterRoleBinding(
+			ctx, logger, runner,
+			"my-operator-e2e-metrics-reader",
+			"my-operator-metrics-reader",
+			namespace,
+			serviceAccountName,
+		)).To(Succeed())
 	})
 
 	AfterAll(func() {
@@ -67,25 +81,33 @@ kubectl create clusterrolebinding my-operator-e2e-metrics-reader \
 			return
 		}
 
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+
 		By("best-effort: cleaning up curl-metrics pods for metrics")
 		cleanupCurlMetricsPods(namespace)
 
-		By("undeploying the controller-manager")
+		By("undeploying the controller-manager (best-effort)")
 		cmd := exec.Command("make", "undeploy")
-		_, _ = utils.Run(cmd)
+		cmd.Dir = rootDir
+		_, _ = runner.Run(ctx, logger, cmd)
 
-		By("uninstalling CRDs")
+		By("uninstalling CRDs (best-effort)")
 		cmd = exec.Command("make", "uninstall")
-		_, _ = utils.Run(cmd)
+		cmd.Dir = rootDir
+		_, _ = runner.Run(ctx, logger, cmd)
 
-		By("removing manager namespace")
+		By("removing manager namespace (best-effort)")
 		cmd = exec.Command("kubectl", "delete", "ns", namespace)
-		_, _ = utils.Run(cmd)
+		_, _ = runner.Run(ctx, logger, cmd)
 	})
 
 	BeforeEach(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), cfg.TokenRequestTimeout)
+		defer cancel()
+
 		By("requesting service account token")
-		t, err := utils.ServiceAccountToken(namespace, serviceAccountName, cfg.TokenRequestTimeout)
+		t, err := kubeutil.ServiceAccountToken(ctx, logger, runner, namespace, serviceAccountName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(t).NotTo(BeEmpty())
 		token = t
@@ -115,7 +137,7 @@ kubectl create clusterrolebinding my-operator-e2e-metrics-reader \
 				ServiceAccountName: serviceAccountName,
 			}
 		},
-		harness.DefaultV3Specs, // ✅ e2e에서 spec 패키지 import 없이
+		harness.DefaultV3Specs,
 		harness.CurlPodFns{
 			RunCurlMetricsOnce:  runCurlMetricsOnce,
 			WaitCurlMetricsDone: waitCurlMetricsDone,
@@ -141,11 +163,10 @@ kubectl create clusterrolebinding my-operator-e2e-metrics-reader \
 			if len(head) > 800 {
 				head = head[:800]
 			}
-			GinkgoWriter.Printf("metrics text head:\n%s\n", head)
+			logger.Logf("metrics text head:\n%s", head)
 		}
 
 		Expect(text).To(ContainSubstring("controller_runtime_reconcile_total"))
-
 		By(fmt.Sprintf("done (timeout=%s)", 2*time.Minute))
 	})
 })
