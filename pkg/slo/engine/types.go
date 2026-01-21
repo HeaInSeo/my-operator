@@ -25,6 +25,6 @@ type ExecuteRequest struct {
 	Config  RunConfig
 	Specs   []spec.SLISpec // core input: 직접 주입
 	OutPath string
-	//(옵션) 호환성/편의용: 레지스트리를 쓰는 호출자를 위해 남길 수 있음, 일단 주석처리함.
-	//SLIIDs  []string
+	// 호환성/편의용: 레지스트리를 쓰는 호출자를 위해 남길 수 있음, 일단 주석처리함.
+	// SLIIDs  []string
 }
