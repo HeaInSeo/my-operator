@@ -15,11 +15,13 @@ type JSONFileWriter struct{}
 
 func NewJSONFileWriter() *JSONFileWriter { return &JSONFileWriter{} }
 
+// Write sync=true for atomic writer durability (fsync)
 func (w *JSONFileWriter) Write(path string, s Summary) error {
 	if path == "" {
-		return nil // skip
+		// skip (no output path configured)
+		return nil
 	}
-	return writeJSONAtomic(path, s, 0o644, 0o755, true /*sync*/)
+	return writeJSONAtomic(path, s, 0o644, 0o755, true)
 }
 
 // writeJSONAtomic writes JSON to a temp file in the same directory and then renames it.
