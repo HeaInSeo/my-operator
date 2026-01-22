@@ -114,7 +114,7 @@ var _ = Describe("Manager", Ordered, func() {
 		cmd = exec.Command("make", "uninstall")
 		cmd.Dir = rootDir
 		_, _ = runner.Run(ctx, logger, cmd)
-
+		// TODO curlmetrics.go 사용하자.
 		By("removing manager namespace (best-effort)")
 		cmd = exec.Command("kubectl", "delete", "ns", namespace, "--ignore-not-found=true")
 		cmd.Dir = rootDir
