@@ -18,6 +18,7 @@ import (
 	e2eenv "github.com/yeongki/my-operator/test/e2e/internal/env"
 )
 
+// TODO 이거 따로 빼야 함.
 const namespace = "my-operator-system"
 const serviceAccountName = "my-operator-controller-manager"
 const metricsServiceName = "my-operator-controller-manager-metrics-service"
