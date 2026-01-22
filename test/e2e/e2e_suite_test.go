@@ -14,7 +14,7 @@ import (
 	"github.com/yeongki/my-operator/pkg/devutil"
 	"github.com/yeongki/my-operator/pkg/kubeutil"
 	"github.com/yeongki/my-operator/pkg/slo"
-	"github.com/yeongki/my-operator/test/utils"
+	"github.com/yeongki/my-operator/test/e2e/e2eutil"
 )
 
 var (
@@ -29,7 +29,7 @@ var (
 	projectImage = "example.com/my-operator:v0.0.1"
 
 	// logger is the suite logger. It is always safe (nil -> no-op).
-	logger = slo.NewLogger(utils.GinkgoLog)
+	logger = slo.NewLogger(e2eutil.GinkgoLog)
 
 	// runner is used by kubeutil/devutil helpers (context-aware).
 	runner kubeutil.CmdRunner = kubeutil.DefaultRunner{}

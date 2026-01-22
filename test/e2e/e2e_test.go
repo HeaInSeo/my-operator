@@ -9,6 +9,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/yeongki/my-operator/test/e2e/manifests"
 
 	"github.com/yeongki/my-operator/pkg/devutil"
 	"github.com/yeongki/my-operator/pkg/kubeutil"
@@ -43,6 +44,7 @@ var _ = Describe("Manager", Ordered, func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
+		// TODO e2eutil 로 빼자.
 		run := func(cmd *exec.Cmd, msg string) string {
 			cmd.Dir = rootDir
 			out, err := runner.Run(ctx, logger, cmd)
@@ -50,21 +52,29 @@ var _ = Describe("Manager", Ordered, func() {
 			return out
 		}
 
-		By("creating manager namespace (idempotent via apply)")
-		nsManifest := fmt.Sprintf(`apiVersion: v1
-kind: Namespace
-metadata:
-  name: %s
-`, namespace)
+		By("Creating manager namespace with baseline security enforcement")
+		//		nsManifest := fmt.Sprintf(`apiVersion: v1
+		//kind: Namespace
+		//metadata:
+		//  name: %s
+		//`, namespace)
+		// TODO apply.go 에서 ApplyTemplate 적용할 지 고민중
+		nsManifest, err := devutil.RenderTemplateFileString(
+			rootDir,
+			"test/e2e/manifests/namespace.tmpl.yaml",
+			manifests.NamespaceData{Namespace: namespace},
+		)
+		Expect(err).NotTo(HaveOccurred())
+
 		cmd := exec.Command("kubectl", "apply", "-f", "-")
 		cmd.Dir = rootDir
 		cmd.Stdin = strings.NewReader(nsManifest)
-		run(cmd, "Failed to apply namespace")
+		run(cmd, "Failed to apply namespace with security policy")
 
-		By("labeling the namespace to enforce the security policy")
-		cmd = exec.Command("kubectl", "label", "--overwrite", "ns", namespace, "pod-security.kubernetes.io/enforce=baseline")
-		cmd.Dir = rootDir
-		run(cmd, "Failed to label namespace with security policy")
+		//By("labeling the namespace to enforce the security policy")
+		//cmd = exec.Command("kubectl", "label", "--overwrite", "ns", namespace, "pod-security.kubernetes.io/enforce=baseline")
+		//cmd.Dir = rootDir
+		//run(cmd, "Failed to label namespace with security policy")
 
 		By("installing CRDs")
 		run(exec.Command("make", "install"), "Failed to install CRDs")
@@ -72,6 +82,7 @@ metadata:
 		By("deploying the controller-manager")
 		run(exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", projectImage)), "Failed to deploy the controller-manager")
 
+		// TODO 추후 ApplyClusterRoleBinding 이걸 감싸서 구현할 수도 있는데 고민 중.
 		By("ensuring metrics reader RBAC for controller-manager SA (idempotent)")
 		Expect(kubeutil.ApplyClusterRoleBinding(
 			ctx, logger, runner,
@@ -87,18 +98,18 @@ metadata:
 			By("E2E_SKIP_CLEANUP enabled: skipping cleanup")
 			return
 		}
-
+		// TODO 10*time.Minute 따로 빼자.
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
 		By("best-effort: cleaning up curl-metrics pods")
 		_ = cm.CleanupByLabel(ctx, namespace)
-
-		By("undeploying the controller-manager (best-effort)")
+		// TODO 기본 Makefile 에 대한 의존성이 생기지만 무시해도 될듯 한데, ????
+		By("un-deploying the controller-manager (best-effort)")
 		cmd := exec.Command("make", "undeploy")
 		cmd.Dir = rootDir
 		_, _ = runner.Run(ctx, logger, cmd)
-
+		// TODO 기본 Makefile 에 대한 의존성이 생기지만 무시해도 될듯 한데, ????
 		By("uninstalling CRDs (best-effort)")
 		cmd = exec.Command("make", "uninstall")
 		cmd.Dir = rootDir

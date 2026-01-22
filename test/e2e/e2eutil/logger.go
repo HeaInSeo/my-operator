@@ -1,4 +1,4 @@
-package utils
+package e2eutil
 
 import (
 	"fmt"

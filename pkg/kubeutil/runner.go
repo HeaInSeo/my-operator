@@ -1,7 +1,6 @@
 package kubeutil
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -27,14 +26,15 @@ func (DefaultRunner) Run(ctx context.Context, logger slo.Logger, cmd *exec.Cmd) 
 	// We rebuild the command using exec.CommandContext but preserve args, dir, stdin.
 	// Note: If cmd.Path is empty, cmd.Args[0] is used; but normally exec.Command sets Path.
 	path := cmd.Path
+	// defensively handle path being empty -> use first arg as path
 	if path == "" && len(cmd.Args) > 0 {
 		path = cmd.Args[0]
 	}
-	args := []string{}
+	var args []string
 	if len(cmd.Args) > 1 {
 		args = cmd.Args[1:]
 	}
-
+	// time out or cancel via ctx
 	c2 := exec.CommandContext(ctx, path, args...)
 	c2.Dir = cmd.Dir
 	c2.Stdin = cmd.Stdin
@@ -48,7 +48,10 @@ func (DefaultRunner) Run(ctx context.Context, logger slo.Logger, cmd *exec.Cmd) 
 	command := strings.Join(c2.Args, " ")
 	logger.Logf("running: %q", command)
 
-	var stdout, stderr bytes.Buffer
+	// TODO 왜 이렇게 했는지, 혹시 문제가 발생한다면 어떠한 문제가 발생할 수 있는지 스터디
+	// var stdout, stderr bytes.Buffer
+	// bytes.Buffer 대신 strings.Builder 사용했다, 그 이유는 메모리 최적화 때문이다.
+	var stdout, stderr strings.Builder
 	c2.Stdout = &stdout
 	c2.Stderr = &stderr
 
