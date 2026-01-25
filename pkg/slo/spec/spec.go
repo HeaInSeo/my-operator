@@ -114,7 +114,10 @@ func NormalizeOp(s string) (Op, bool) {
 		return OpGT, true
 	case "eq":
 		return OpEQ, true
-	// TODO(v4): normalize Unicode operators (≤ ≥), 유니코드로 사용할 수 있어서 향후 업데트할때 넣자.
+	case "\u2264": // ≤
+		return OpLE, true
+	case "\u2265": // ≥
+		return OpGE, true
 	default:
 		return "", false
 	}
