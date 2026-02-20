@@ -20,18 +20,24 @@ import (
 var (
 	// Optional Environment Variables:
 	// - CERT_MANAGER_INSTALL_SKIP=true: Skips CertManager installation during test setup.
+	// 선택적 환경 변수:
+	// - CERT_MANAGER_INSTALL_SKIP=true: 테스트 설정 중 CertManager 설치를 건너뜁니다.
 	skipCertManagerInstall = os.Getenv("CERT_MANAGER_INSTALL_SKIP") == "true"
 
 	// isCertManagerAlreadyInstalled will be set true when CertManager CRDs are found on the cluster.
+	// isCertManagerAlreadyInstalled는 CertManager CRD가 클러스터에서 발견되면 true로 설정됩니다.
 	isCertManagerAlreadyInstalled = false
 
 	// projectImage is the name of the image which will be built and loaded with the code source changes to be tested.
+	// projectImage는 테스트할 코드 소스 변경 사항으로 빌드되고 로드될 이미지의 이름입니다.
 	projectImage = "example.com/my-operator:v0.0.1"
 
 	// logger is the suite logger. It is always safe (nil -> no-op).
+	// logger는 스위트 로거입니다. 항상 안전합니다 (nil -> no-op).
 	logger = slo.NewLogger(e2eutil.GinkgoLog)
 
 	// runner is used by kubeutil/devutil helpers (context-aware).
+	// runner는 kubeutil/devutil 헬퍼(컨텍스트 인식)에서 사용됩니다.
 	runner kubeutil.CmdRunner = kubeutil.DefaultRunner{}
 )
 
@@ -44,6 +50,8 @@ func TestE2E(t *testing.T) {
 var _ = BeforeSuite(func() {
 	// A reasonable default guard for setup steps.
 	// Individual kubectl commands also have their own timeouts (e.g. kubectl wait --timeout).
+	// 설정 단계를 위한 합리적인 기본 가드입니다.
+	// 개별 kubectl 명령어들도 자체적인 타임아웃을 가지고 있습니다 (예: kubectl wait --timeout).
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 

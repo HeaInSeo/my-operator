@@ -12,18 +12,23 @@ import (
 )
 
 // Logger keeps pkg/slo independent from klog/logr.
-//type Logger interface {
+// Logger는 pkg/slo를 klog/logr로부터 독립적으로 유지합니다.
+// type Logger interface {
 //	Logf(format string, args ...any)
-//}
+// }
 
+// Engine orchestrates the metrics fetching and SLI evaluation.
+// Engine은 메트릭 수집과 SLI 평가를 조율합니다.
 type Engine struct {
 	fetcher fetch.MetricsFetcher
-	//Spec  registry.Registry // (옵션) 레지스트리를 쓰는 호출자를 위해 남길 수 있음, 일단 주석처리함.
-	//reg     *spec.Registry
+	// Spec  registry.Registry // (옵션) 레지스트리를 쓰는 호출자를 위해 남길 수 있음, 일단 주석처리함.
+	// reg     *spec.Registry
 	writer summary.Writer
 	logf   func(string, ...any)
 }
 
+// New creates a new Engine instance.
+// New는 새로운 Engine 인스턴스를 생성합니다.
 func New(fetcher fetch.MetricsFetcher, writer summary.Writer, l slo.Logger) *Engine {
 	logf := func(string, ...any) {}
 	if l != nil {
@@ -32,6 +37,8 @@ func New(fetcher fetch.MetricsFetcher, writer summary.Writer, l slo.Logger) *Eng
 	return &Engine{fetcher: fetcher, writer: writer, logf: logf}
 }
 
+// Execute runs the SLO measurement and evaluation process.
+// Execute는 SLO 측정 및 평가 프로세스를 실행합니다.
 func (e *Engine) Execute(ctx context.Context, req ExecuteRequest) (*summary.Summary, error) {
 	cfg := req.Config
 	if cfg.StartedAt.IsZero() || cfg.FinishedAt.IsZero() {
@@ -42,6 +49,7 @@ func (e *Engine) Execute(ctx context.Context, req ExecuteRequest) (*summary.Summ
 	start, err := e.fetcher.Fetch(ctx, cfg.StartedAt)
 	if err != nil {
 		// philosophy: "measurement failure is not test failure" → return a Summary with warnings
+		// 철학: "측정 실패는 테스트 실패가 아님" → 경고가 포함된 Summary 반환
 		s := e.emptySummary(cfg, []string{fmt.Sprintf("fetch(start) failed: %v", err)})
 		_ = e.writer.Write(req.OutPath, *s)
 		return s, nil
@@ -211,4 +219,29 @@ func compare(v float64, op spec.Op, target float64) bool {
 	default:
 		return false
 	}
+}
+
+// ExecuteRequestStandard is the standardized request shape (formerly V4).
+type ExecuteRequestStandard struct {
+	Method  MeasurementMethod
+	Config  RunConfig
+	Specs   []spec.SLISpec
+	OutPath string
+}
+
+// ExecuteStandard applies standard defaults and delegates to the engine.
+func ExecuteStandard(ctx context.Context, eng *Engine, req ExecuteRequestStandard) (*summary.Summary, error) {
+	if req.Config.Format == "" {
+		req.Config.Format = "v4"
+	}
+	mode := MapMethodToRunMode(req.Method)
+	req.Config.Mode = RunMode{
+		Location: string(mode.Location),
+		Trigger:  string(mode.Trigger),
+	}
+	return eng.Execute(ctx, ExecuteRequest{
+		Config:  req.Config,
+		Specs:   req.Specs,
+		OutPath: req.OutPath,
+	})
 }

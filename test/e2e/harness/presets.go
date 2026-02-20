@@ -1,5 +1,13 @@
 package harness
 
+// TODO(specs): Provide preset bundles as JSON/YAML (checked into repo) so other operators can reuse without Go code.
+//   Example:
+//     - test/e2e/slo-specs/baseline-v3.json
+//     - harness.LoadSpecsFromFile(path)
+//     - harness.LoadPreset("baseline-v3")
+//
+// TODO(specs): Keep BaselineV3Specs as a Go fallback, but make config-driven specs the primary path.
+
 import "github.com/yeongki/my-operator/pkg/slo/spec"
 
 // DefaultV3Specs is kept for backward compatibility.

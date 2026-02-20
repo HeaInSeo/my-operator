@@ -33,7 +33,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// JobOperatorReconciler reconciles a JobOperator object
+// JobOperatorReconciler는 JobOperator 객체를 조정(reconcile)합니다.
 type JobOperatorReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -44,13 +44,14 @@ type JobOperatorReconciler struct {
 // +kubebuilder:rbac:groups=batch.my.domain,resources=joboperators/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 
+// Reconcile은 조정 루프를 처리합니다.
 func (r *JobOperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	// [Metrics] 시작 시간 측정
 	startTime := time.Now()
 
-	// Fetch the JobOperator instance
+	// JobOperator 인스턴스 조회
 	jobOp := &batchv1.JobOperator{}
 	if err := r.Get(ctx, req.NamespacedName, jobOp); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -62,7 +63,7 @@ func (r *JobOperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	// Create or update StatefulSet
+	// StatefulSet 생성 또는 업데이트
 	sts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobOp.Name + "-sts",
@@ -124,7 +125,7 @@ func (r *JobOperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	return ctrl.Result{}, nil
 }
 
-// SetupWithManager sets up the controller with the Manager.
+// SetupWithManager는 매니저와 함께 컨트롤러를 설정합니다.
 func (r *JobOperatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&batchv1.JobOperator{}).

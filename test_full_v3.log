@@ -1,0 +1,25 @@
+kind create cluster --name my-operator-test-e2e
+Creating cluster "my-operator-test-e2e" ...
+ • Ensuring node image (kindest/node:v1.32.2) 🖼  ...
+ ✓ Ensuring node image (kindest/node:v1.32.2) 🖼
+ • Preparing nodes 📦   ...
+ ✓ Preparing nodes 📦 
+ • Writing configuration 📜  ...
+ ✓ Writing configuration 📜
+ • Starting control-plane 🕹️  ...
+ ✓ Starting control-plane 🕹️
+ • Installing CNI 🔌  ...
+ ✓ Installing CNI 🔌
+ • Installing StorageClass 💾  ...
+ ✓ Installing StorageClass 💾
+Set kubectl context to "kind-my-operator-test-e2e"
+You can now use your cluster with:
+
+kubectl cluster-info --context kind-my-operator-test-e2e
+
+Have a nice day! 👋
+/home/dev-comd/go/src/github.com/HeaInSeo/my-operator/bin/controller-gen rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+-: found packages harness (attach.go) and e2e (e2e_test.go) in /home/dev-comd/go/src/github.com/HeaInSeo/my-operator/harness_todos
+Error: not all generators ran successfully
+run `controller-gen rbac:roleName=manager-role crd webhook paths=./... output:crd:artifacts:config=config/crd/bases -w` to see all available markers, or `controller-gen rbac:roleName=manager-role crd webhook paths=./... output:crd:artifacts:config=config/crd/bases -h` for usage
+make: *** [Makefile:46: manifests] Error 1

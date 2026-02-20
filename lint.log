@@ -1,0 +1,178 @@
+cmd/main.go:58:1: cognitive complexity 19 of func `main` is high (> 15) (gocognit)
+func main() {
+^
+pkg/kubeutil/token.go:43:1: cognitive complexity 19 of func `ServiceAccountToken` is high (> 15) (gocognit)
+func ServiceAccountToken(ctx context.Context, logger slo.Logger, r CmdRunner, ns, sa string) (string, error) {
+^
+pkg/slo/common/promkey/promkey.go:81:1: cognitive complexity 35 of func `parseLabels` is high (> 15) (gocognit)
+func parseLabels(s string) (map[string]string, error) {
+^
+pkg/kubeutil/rbac.go:19:1: The line is 144 characters long, which exceeds the maximum of 120 characters. (lll)
+func ApplyClusterRoleBinding(ctx context.Context, logger slo.Logger, r CmdRunner, name string, clusterRole string, ns string, sa string) error {
+^
+pkg/kubeutil/wait.go:37:1: The line is 121 characters long, which exceeds the maximum of 120 characters. (lll)
+func WaitControllerManagerReady(ctx context.Context, logger slo.Logger, r CmdRunner, ns string, opts WaitOptions) error {
+^
+pkg/kubeutil/wait.go:52:1: The line is 179 characters long, which exceeds the maximum of 120 characters. (lll)
+func WaitPodContainerReadyByLabel(ctx context.Context, logger slo.Logger, r CmdRunner, ns string, labelSelector string, podIndex int, containerIndex int, opts WaitOptions) error {
+^
+pkg/kubeutil/wait.go:115:1: The line is 130 characters long, which exceeds the maximum of 120 characters. (lll)
+func WaitServiceHasEndpoints(ctx context.Context, logger slo.Logger, r CmdRunner, ns string, svc string, opts WaitOptions) error {
+^
+test/e2e/e2eutil/apply.go:30:1: The line is 129 characters long, which exceeds the maximum of 120 characters. (lll)
+func ApplyTemplate(ctx context.Context, rootDir string, relPath string, data any, runner Runner, logger Logger) (string, error) {
+^
+internal/controller/joboperator_controller.go:47:1: exported: exported method JobOperatorReconciler.Reconcile should have comment or be unexported (revive)
+func (r *JobOperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+^
+internal/controller/metrics.go:9:2: exported: comment on exported var ReconcileDurationSeconds should be of the form "ReconcileDurationSeconds ..." (revive)
+	// ReconcileDurationSeconds: Reconcile 작업 소요 시간 히스토그램 (0.1s ~ 30s)
+	^
+internal/controller/metrics.go:19:2: exported: comment on exported var ReconcileTotal should be of the form "ReconcileTotal ..." (revive)
+	// ReconcileTotal: Reconcile 총 시도 횟수
+	^
+internal/controller/metrics.go:28:2: exported: comment on exported var ReconcileErrors should be of the form "ReconcileErrors ..." (revive)
+	// ReconcileErrors: Reconcile 에러 발생 횟수
+	^
+pkg/devutil/anno.go:5:7: exported: exported const TestStartTimeAnnoKey should have comment or be unexported (revive)
+const TestStartTimeAnnoKey = "test/start-time"
+      ^
+pkg/devutil/template.go:45:1: exported: exported function RenderTemplateFileString should have comment or be unexported (revive)
+func RenderTemplateFileString(rootDir, relPath string, data any) (string, error) {
+^
+pkg/kubeutil/prometheus_operator.go:13:2: exported: exported const PrometheusOperatorVersion should have comment (or a comment on this block) or be unexported (revive)
+	PrometheusOperatorVersion = "v0.77.1"
+	^
+pkg/kubeutil/prometheus_operator.go:20:1: exported: exported function PrometheusOperatorURL should have comment or be unexported (revive)
+func PrometheusOperatorURL() string {
+^
+pkg/kubeutil/runner.go:22:1: exported: exported method DefaultRunner.Run should have comment or be unexported (revive)
+func (DefaultRunner) Run(ctx context.Context, logger slo.Logger, cmd *exec.Cmd) (string, error) {
+^
+pkg/slo/engine/engine.go:15:1: comment-spacings: no space between comment delimiter and comment text (revive)
+//type Logger interface {
+^
+pkg/slo/engine/engine.go:17:1: comment-spacings: no space between comment delimiter and comment text (revive)
+//}
+^
+pkg/slo/engine/engine.go:19:6: exported: exported type Engine should have comment or be unexported (revive)
+type Engine struct {
+     ^
+pkg/slo/engine/engine.go:21:2: comment-spacings: no space between comment delimiter and comment text (revive)
+	//Spec  registry.Registry // (옵션) 레지스트리를 쓰는 호출자를 위해 남길 수 있음, 일단 주석처리함.
+	^
+pkg/slo/engine/engine.go:27:1: exported: exported function New should have comment or be unexported (revive)
+func New(fetcher fetch.MetricsFetcher, writer summary.Writer, l slo.Logger) *Engine {
+^
+pkg/slo/engine/engine.go:35:1: exported: exported method Engine.Execute should have comment or be unexported (revive)
+func (e *Engine) Execute(ctx context.Context, req ExecuteRequest) (*summary.Summary, error) {
+^
+pkg/slo/engine/types.go:9:6: exported: exported type RunMode should have comment or be unexported (revive)
+type RunMode struct {
+     ^
+pkg/slo/engine/types.go:14:6: exported: exported type RunConfig should have comment or be unexported (revive)
+type RunConfig struct {
+     ^
+pkg/slo/engine/types.go:25:6: exported: exported type ExecuteRequest should have comment or be unexported (revive)
+type ExecuteRequest struct {
+     ^
+pkg/slo/engine/types.go:37:2: exported: exported const InsideSnapshot should have comment (or a comment on this block) or be unexported (revive)
+	InsideSnapshot MeasurementMethod = "InsideSnapshot"
+	^
+pkg/slo/engine/types.go:39:2: exported: comment on exported const InsideAnnotation should be of the form "InsideAnnotation ..." (revive)
+	// Reserved for later phases.
+	^
+pkg/slo/engine/types.go:51:2: exported: exported const RunLocationInside should have comment (or a comment on this block) or be unexported (revive)
+	RunLocationInside  RunLocation = "inside"
+	^
+pkg/slo/fetch/curlpod/client.go:14:7: exported: exported const PodLabelSelector should have comment or be unexported (revive)
+const PodLabelSelector = "app=curl-metrics"
+      ^
+pkg/slo/log.go:10:1: exported: exported method nopLogger.Logf should have comment or be unexported (revive)
+func (nopLogger) Logf(string, ...any) {}
+^
+pkg/slo/spec/registry.go:5:6: exported: exported type Registry should have comment or be unexported (revive)
+type Registry struct {
+     ^
+pkg/slo/spec/registry.go:9:1: exported: exported function NewRegistry should have comment or be unexported (revive)
+func NewRegistry() *Registry {
+^
+pkg/slo/spec/registry.go:13:1: exported: exported method Registry.Register should have comment or be unexported (revive)
+func (r *Registry) Register(s SLISpec) error {
+^
+pkg/slo/spec/registry.go:24:1: exported: exported method Registry.MustRegister should have comment or be unexported (revive)
+func (r *Registry) MustRegister(s SLISpec) {
+^
+pkg/slo/spec/registry.go:30:1: exported: exported method Registry.Get should have comment or be unexported (revive)
+func (r *Registry) Get(id string) (SLISpec, bool) {
+^
+pkg/slo/spec/registry.go:35:1: exported: exported method Registry.List should have comment or be unexported (revive)
+func (r *Registry) List() []SLISpec {
+^
+pkg/slo/spec/spec.go:18:1: exported: exported function UnsafePromKey should have comment or be unexported (revive)
+func UnsafePromKey(key string) MetricRef { return MetricRef{Key: key} }
+^
+pkg/slo/spec/spec.go:20:6: exported: exported type Labels should have comment or be unexported (revive)
+type Labels map[string]string
+     ^
+pkg/slo/spec/spec.go:22:1: exported: exported function PromMetric should have comment or be unexported (revive)
+func PromMetric(name string, labels Labels) MetricRef {
+^
+pkg/slo/spec/spec.go:30:2: exported: exported const ComputeSingle should have comment (or a comment on this block) or be unexported (revive)
+	ComputeSingle ComputeMode = "single" // use start snapshot only (legacy v3)
+	^
+pkg/slo/spec/spec.go:33:2: exported: comment on exported const ComputeStart should be of the form "ComputeStart ..." (revive)
+	// V4 Modes
+	^
+pkg/slo/spec/spec.go:43:6: exported: exported type Level should have comment or be unexported (revive)
+type Level string
+     ^
+pkg/slo/spec/spec.go:46:2: exported: exported const LevelWarn should have comment (or a comment on this block) or be unexported (revive)
+	LevelWarn Level = "warn"
+	^
+pkg/slo/spec/spec.go:50:6: exported: exported type Op should have comment or be unexported (revive)
+type Op string
+     ^
+pkg/slo/spec/spec.go:53:2: exported: exported const OpLE should have comment (or a comment on this block) or be unexported (revive)
+	OpLE Op = "<="
+	^
+pkg/slo/spec/spec.go:60:1: exported: exported method Op.UnmarshalText should have comment or be unexported (revive)
+func (o *Op) UnmarshalText(text []byte) error {
+^
+pkg/slo/spec/spec.go:77:6: exported: exported type JudgeSpec should have comment or be unexported (revive)
+type JudgeSpec struct {
+     ^
+pkg/slo/spec/spec.go:95:1: exported: exported function NormalizeOp should have comment or be unexported (revive)
+func NormalizeOp(s string) (Op, bool) {
+^
+pkg/slo/summary/schema.go:9:2: exported: exported const StatusPass should have comment (or a comment on this block) or be unexported (revive)
+	StatusPass Status = "pass"
+	^
+pkg/slo/summary/writer.go:14:6: exported: exported type JSONFileWriter should have comment or be unexported (revive)
+type JSONFileWriter struct{}
+     ^
+pkg/slo/summary/writer.go:16:1: exported: exported function NewJSONFileWriter should have comment or be unexported (revive)
+func NewJSONFileWriter() *JSONFileWriter { return &JSONFileWriter{} }
+^
+test/e2e/e2eutil/logger.go:18:1: exported: exported method GinkgoLogger.Logf should have comment or be unexported (revive)
+func (GinkgoLogger) Logf(format string, args ...any) {
+^
+test/e2e/e2eutil/logger.go:25:1: exported: comment on exported var GinkgoLog should be of the form "GinkgoLog ..." (revive)
+// Ready-to-use instance
+^
+test/e2e/harness/session.go:195:1: exported: exported method curlPodFetcher.Fetch should have comment or be unexported (revive)
+func (f *curlPodFetcher) Fetch(ctx context.Context, at time.Time) (fetch.Sample, error) {
+^
+test/e2e/internal/env/options.go:21:1: exported: exported method Options.Validate should have comment or be unexported (revive)
+func (o Options) Validate() Options {
+^
+test/e2e/internal/env/options.go:32:1: exported: exported method Options.SummaryPath should have comment or be unexported (revive)
+func (o Options) SummaryPath(filename string) string {
+^
+test/e2e/manifests/types.go:3:6: exported: exported type NamespaceData should have comment or be unexported (revive)
+type NamespaceData struct {
+     ^
+58 issues:
+* gocognit: 3
+* lll: 5
+* revive: 50

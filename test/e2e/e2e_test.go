@@ -9,13 +9,17 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/yeongki/my-operator/test/e2e/manifests"
+
 
 	"github.com/yeongki/my-operator/pkg/devutil"
 	"github.com/yeongki/my-operator/pkg/kubeutil"
-	"github.com/yeongki/my-operator/test/e2e/curlmetrics"
+
+	"github.com/yeongki/my-operator/pkg/slo/fetch"
+	"github.com/yeongki/my-operator/pkg/slo/fetch/curlpod"
+	
 	"github.com/yeongki/my-operator/test/e2e/harness"
 	e2eenv "github.com/yeongki/my-operator/test/e2e/internal/env"
+	"github.com/yeongki/my-operator/test/e2e/manifests"
 )
 
 // TODO 이거 따로 빼야 함.
@@ -25,11 +29,18 @@ const metricsServiceName = "my-operator-controller-manager-metrics-service"
 
 var _ = Describe("Manager", Ordered, func() {
 	var (
+		// TODO 추후 런타임에 쓰이는 정보들, 초기 설정에 관련된 정보들, 계측에필요한 설정등은 정리는 했지만 문서로 만들어 놓자.
 		cfg     e2eenv.Options
-		token   string
 		rootDir string
 
-		cm *curlmetrics.Client
+		cm *curlpod.Client
+
+		// shared per test
+		metricsToken   string
+		metricsPod     *curlpod.CurlPod
+		metricsFetcher fetch.MetricsFetcher
+		// 일단 주석처리함
+		//token   string
 	)
 
 	BeforeAll(func() {
@@ -40,7 +51,7 @@ var _ = Describe("Manager", Ordered, func() {
 		rootDir, err = devutil.GetProjectDir()
 		Expect(err).NotTo(HaveOccurred())
 
-		cm = curlmetrics.New(logger, runner)
+		cm = curlpod.New(logger, runner)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
@@ -55,10 +66,10 @@ var _ = Describe("Manager", Ordered, func() {
 
 		By("Creating manager namespace with baseline security enforcement")
 		//		nsManifest := fmt.Sprintf(`apiVersion: v1
-		//kind: Namespace
-		//metadata:
-		//  name: %s
-		//`, namespace)
+		// kind: Namespace
+		// metadata:
+		//   name: %s
+		// `, namespace)
 		// TODO apply.go 에서 ApplyTemplate 적용할 지 고민중
 		nsManifest, err := devutil.RenderTemplateFileString(
 			rootDir,
@@ -121,76 +132,92 @@ var _ = Describe("Manager", Ordered, func() {
 		cmd.Dir = rootDir
 		_, _ = runner.Run(ctx, logger, cmd)
 	})
-	// TODO opts *WaitOptions 로 할지 고민 중
+
+	// TODO opts *WaitOptions 로 할지 고민 중 TODO: 5*time.Minute 따로 빼자.
 	BeforeEach(func() {
-		waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer waitCancel()
+    waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+    defer waitCancel()
 
-		opts := kubeutil.WaitOptions{}
+    opts := kubeutil.WaitOptions{}
 
-		By("waiting controller-manager ready")
-		Expect(
-			kubeutil.WaitControllerManagerReady(waitCtx, logger, runner, namespace, opts),
-		).To(Succeed())
+    By("waiting controller-manager ready")
+    Expect(kubeutil.WaitControllerManagerReady(waitCtx, logger, runner, namespace, opts)).To(Succeed())
 
-		By("waiting metrics service endpoints ready")
-		Expect(
-			kubeutil.WaitServiceHasEndpoints(waitCtx, logger, runner, namespace, metricsServiceName, opts),
-		).To(Succeed())
+    By("waiting metrics service endpoints ready")
+    Expect(kubeutil.WaitServiceHasEndpoints(waitCtx, logger, runner, namespace, metricsServiceName, opts)).To(Succeed())
+	
+	})
 
-		tokCtx, tokCancel := context.WithTimeout(context.Background(), cfg.TokenRequestTimeout)
-		defer tokCancel()
+	// ---- shared token + curlpod (used by BOTH harness + It) ----
+		tokCtx, cancel := context.WithTimeout(context.Background(), cfg.TokenRequestTimeout)
+		defer cancel()
 
-		By("requesting service account token")
+		By("requesting service account token (shared)")
 		t, err := kubeutil.ServiceAccountToken(tokCtx, logger, runner, namespace, serviceAccountName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(t).NotTo(BeEmpty())
-		token = t
+		metricsToken = t
+
+		metricsPod = &curlpod.CurlPod{
+			Client:             cm,
+			Namespace:          namespace,
+			MetricsServiceName: metricsServiceName,
+			ServiceAccountName: serviceAccountName,
+			Token:              metricsToken,
+			// Image / ServiceURLFormat override 필요하면 여기서 지정
+		}
+
+		// NOTE:
+		// - 아래 Fetcher 타입은 제안한 방식대로 pkg/slo/fetch/curlpod/fetcher.go로 빼는 게 정석.
+		// - 아직 없으면, 일단 harness 내부 default fetcher를 유지하거나,
+		//   test-side adapter로 fetcher를 임시 구현해도 됨.
+		// metricsFetcher = &curlpod.Fetcher{
+		// 	Pod:               metricsPod,
+		// 	AggregateNameOnly: true,
+		// 	// timeouts override 필요하면 여기서
+		// }
+		// 일단 이렇게
+		 metricsFetcher = nil
 	})
 
-	harness.Attach(
-		func() harness.HarnessDeps {
-			return harness.HarnessDeps{
-				ArtifactsDir: cfg.ArtifactsDir,
-				Suite:        "e2e",
-				TestCase:     "",
-				RunID:        cfg.RunID,
-				Enabled:      cfg.Enabled,
-			}
-		},
-		func() harness.FetchDeps {
-			return harness.FetchDeps{
-				Namespace:          namespace,
-				Token:              token,
-				MetricsServiceName: metricsServiceName,
-				ServiceAccountName: serviceAccountName,
-			}
-		},
-		harness.DefaultV3Specs,
-		harness.CurlPodFns{
-			// harness가 기존 함수 타입을 기대한다면, 여기서 얇게 어댑트만 유지
-			RunCurlMetricsOnce: func(ns, token, metricsSvcName, sa string) (string, error) {
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-				defer cancel()
-				return cm.RunOnce(ctx, ns, token, metricsSvcName, sa)
-			},
-			WaitCurlMetricsDone: func(ns, podName string) {
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-				defer cancel()
-				Expect(cm.WaitDone(ctx, ns, podName, 2*time.Second)).To(Succeed())
-			},
-			CurlMetricsLogs: func(ns, podName string) (string, error) {
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-				defer cancel()
-				return cm.Logs(ctx, ns, podName)
-			},
-			DeletePodNoWait: func(ns, podName string) error {
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-				return cm.DeletePodNoWait(ctx, ns, podName)
-			},
-		},
-	)
+	// Use V4 Harness (Standardized)
+	// V4 하니스 사용 (표준화됨)
+	_, err := harness.Attach(func() harness.SessionConfig {
+		// NOTE: token 발급/스크랩 로직은 BeforeEach에서 공유됨.
+		// tokCtx, cancel := context.WithTimeout(context.Background(), cfg.TokenRequestTimeout)
+    	// defer cancel()
+
+		// By("requesting service account token (for harness)")
+    	// t, err := kubeutil.ServiceAccountToken(tokCtx, logger, runner, namespace, serviceAccountName)
+    	// Expect(err).NotTo(HaveOccurred())
+    	// Expect(t).NotTo(BeEmpty())
+
+		
+		return harness.SessionConfig{
+			// TODO Enabled 지울지 고민하자. 일단 주석처리함.
+			//Enabled: 			cfg.Enabled,
+			Namespace:          namespace,
+			MetricsServiceName: metricsServiceName,
+			TestCase:           "", // Auto-filled by harness
+			Suite:              "e2e",
+			
+			RunID:              cfg.RunID,
+			//ServiceAccountName: serviceAccountName,
+			//Token:              t,
+			ArtifactsDir:       cfg.ArtifactsDir,
+			// TODO 일단 이렇게 주석처리함. 잘 봐야 함.
+			//Fetcher: metricsFetcher,
+
+			// TODO(태그): 런 상관관계(correlation) 분석을 위해 실행 메타 태그를 추가한다.
+        	// 예: git commit SHA, kind cluster name, controller image tag, k8s version, CI run id 등
+        	// Tags: map[string]string{
+			// 	"commit":  "",
+			// 	"cluster": "",
+			// 	"image":   "",
+        	// },
+		}
+	})
+	Expect(err).NotTo(HaveOccurred())
 
 	It("should ensure the metrics endpoint is serving metrics", func() {
 		By("scraping /metrics via curl pod")
@@ -198,16 +225,7 @@ var _ = Describe("Manager", Ordered, func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 
-		podName, err := cm.RunOnce(ctx, namespace, token, metricsServiceName, serviceAccountName)
-		Expect(err).NotTo(HaveOccurred())
-
-		defer func() { _ = cm.DeletePodNoWait(context.Background(), namespace, podName) }()
-
-		waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer waitCancel()
-		Expect(cm.WaitDone(waitCtx, namespace, podName, 2*time.Second)).To(Succeed())
-
-		text, err := cm.Logs(ctx, namespace, podName)
+		text, err := metricsPod.Run(ctx, 5*time.Minute, 2*time.Minute)
 		Expect(err).NotTo(HaveOccurred())
 
 		if !strings.Contains(text, "controller_runtime_reconcile_total") {
@@ -219,6 +237,6 @@ var _ = Describe("Manager", Ordered, func() {
 		}
 
 		Expect(text).To(ContainSubstring("controller_runtime_reconcile_total"))
-		By(fmt.Sprintf("done (timeout=%s)", 2*time.Minute))
+		By("done")
 	})
 })

@@ -10,13 +10,18 @@ import (
 )
 
 const (
+	// PrometheusOperatorVersion is the version of the bundle to install.
+	// PrometheusOperatorVersion은 설치할 번들의 버전입니다.
 	PrometheusOperatorVersion = "v0.77.1"
 
 	// Split to satisfy lll (max 120 chars) while keeping identical URL.
+	// lll(최대 120자)을 만족하기 위해 분할했지만 URL은 동일합니다.
 	prometheusOperatorURLTmpl = "https://github.com/prometheus-operator/" +
 		"prometheus-operator/releases/download/%s/bundle.yaml"
 )
 
+// PrometheusOperatorURL returns the download URL for the bundle.
+// PrometheusOperatorURL은 번들의 다운로드 URL을 반환합니다.
 func PrometheusOperatorURL() string {
 	return fmt.Sprintf(prometheusOperatorURLTmpl, PrometheusOperatorVersion)
 }
@@ -25,6 +30,10 @@ func PrometheusOperatorURL() string {
 // - enabled=false이면 설치를 건너뛰고 nil 반환(테스트/운영에서 토글하기 쉬움).
 // - logger may be nil (no-op).
 // - r may be nil (uses DefaultRunner).
+// InstallPrometheusOperator는 Prometheus Operator 번들을 설치합니다.
+// - enabled=false이면 설치를 건너뛰고 nil 반환(테스트/운영에서 토글하기 쉬움).
+// - logger는 nil일 수 있습니다 (no-op).
+// - r은 nil일 수 있습니다 (DefaultRunner 사용).
 func InstallPrometheusOperator(
 	ctx context.Context,
 	logger slo.Logger,
@@ -57,6 +66,9 @@ func InstallPrometheusOperator(
 // UninstallPrometheusOperator uninstalls Prometheus Operator bundle.
 // - logger may be nil (no-op).
 // - r may be nil (uses DefaultRunner).
+// UninstallPrometheusOperator는 Prometheus Operator 번들을 제거합니다.
+// - logger는 nil일 수 있습니다 (no-op).
+// - r은 nil일 수 있습니다 (DefaultRunner 사용).
 func UninstallPrometheusOperator(
 	ctx context.Context,
 	logger slo.Logger,
@@ -87,6 +99,9 @@ func UninstallPrometheusOperator(
 // IsPrometheusOperatorCRDsInstalled checks if Prometheus Operator CRDs exist.
 // - logger may be nil (no-op).
 // - r may be nil (uses DefaultRunner).
+// IsPrometheusOperatorCRDsInstalled는 Prometheus Operator CRD가 존재하는지 확인합니다.
+// - logger는 nil일 수 있습니다 (no-op).
+// - r은 nil일 수 있습니다 (DefaultRunner 사용).
 func IsPrometheusOperatorCRDsInstalled(
 	ctx context.Context,
 	logger slo.Logger,

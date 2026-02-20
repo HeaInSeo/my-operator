@@ -1,12 +1,13 @@
-package curlmetrics
+package curlpod
 
 import (
 	"context"
 	"time"
 )
 
-// CurlPodV4 encapsulates the v4 curl pod lifecycle without external adapters.
-type CurlPodV4 struct {
+// CurlPod encapsulates the curl pod lifecycle without external adapters.
+// CurlPod는 외부 어댑터 없이 curl 파드 수명 주기를 캡슐화합니다.
+type CurlPod struct {
 	Client             *Client
 	Namespace          string
 	MetricsServiceName string
@@ -17,8 +18,9 @@ type CurlPodV4 struct {
 	ServiceURLFormat string
 }
 
-// Run executes the v4 curl pod lifecycle and returns logs.
-func (c *CurlPodV4) Run(ctx context.Context, waitTimeout time.Duration, logsTimeout time.Duration) (string, error) {
+// Run executes the curl pod lifecycle and returns logs.
+// Run은 curl 파드 수명 주기를 실행하고 로그를 반환합니다.
+func (c *CurlPod) Run(ctx context.Context, waitTimeout time.Duration, logsTimeout time.Duration) (string, error) {
 	client := c.Client
 	if client == nil {
 		client = New(nil, nil)

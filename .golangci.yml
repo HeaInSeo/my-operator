@@ -36,6 +36,9 @@ linters:
     # cyclomatic complexity(복잡도) 제한
     - gocyclo
 
+    # cognitive complexity(인지 복잡도) 제한: Reconcile 비대화/승격 유도에 효과적
+    - gocognit
+
     # go vet(정적 분석)
     - govet
 
@@ -109,12 +112,30 @@ linters:
               desc: "pkg/slo는 klog에 의존하지 않는다."
 
     # --------------------------------------------------------------------------
+    # gocyclo: cyclomatic complexity(분기 복잡도) 제한
+    # --------------------------------------------------------------------------
+    gocyclo:
+      # 함수 단위 최대 복잡도
+      min-complexity: 15
+
+    # --------------------------------------------------------------------------
+    # gocognit: cognitive complexity(인지 복잡도) 제한
+    # - Reconcile()이 "읽기 어려운 거대 함수"가 되는 것을 방지(승격 유도)
+    # --------------------------------------------------------------------------
+    gocognit:
+      min-complexity: 15
+
+    # --------------------------------------------------------------------------
     # revive: 룰 기반 스타일/품질 검사
     # --------------------------------------------------------------------------
     revive:
       rules:
         - name: comment-spacings
         - name: import-shadowing
+        # Exported API 주석 작성 강제(특히 P5/pkg/* 공개 API 품질)
+        - name: exported
+          arguments:
+            - "checkPrivateReceivers"
 
   # ----------------------------------------------------------------------------
   # Exclusions: 특정 경로/파일에 대해 린터를 느슨하게 적용
@@ -135,11 +156,17 @@ linters:
           - dupl
           - lll
         path: internal/*
+
       # e2e에서는 ginkgo dot import를 허용 (staticcheck ST1001만 예외)
       - linters:
-        - staticcheck
+          - staticcheck
         text: "ST1001"
         path: test/e2e/
+
+      # pkg/slo의 테스트는 depguard에서 제외 (테스트 보조 라이브러리 사용 허용)
+      - linters:
+          - depguard
+        path: pkg/slo/.*_test\.go
 
     # 린트에서 아예 제외할 경로 패턴(정규식)
     paths:

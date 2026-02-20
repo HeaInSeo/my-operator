@@ -13,6 +13,11 @@ import (
 //
 // - missing keys cause error (missingkey=error)
 // - rootDir is typically the project root (e.g., repo root)
+// RenderTemplateFile은 (rootDir + relPath)에 있는 템플릿 파일을 읽고, 데이터를 사용하여 실행한 뒤,
+// 렌더링된 바이트를 반환합니다.
+//
+// - 키가 누락되면 에러가 발생합니다 (missingkey=error).
+// - rootDir은 일반적으로 프로젝트 루트(예: repo root)입니다.
 func RenderTemplateFile(rootDir, relPath string, data any) ([]byte, error) {
 	if rootDir == "" {
 		return nil, fmt.Errorf("rootDir is empty")
@@ -42,6 +47,8 @@ func RenderTemplateFile(rootDir, relPath string, data any) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
+// RenderTemplateFileString renders a template file to a string.
+// RenderTemplateFileString은 템플릿 파일을 렌더링하여 문자열로 반환합니다.
 func RenderTemplateFileString(rootDir, relPath string, data any) (string, error) {
 	b, err := RenderTemplateFile(rootDir, relPath, data)
 	if err != nil {

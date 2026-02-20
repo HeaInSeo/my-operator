@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	// ReconcileDurationSeconds: Reconcile 작업 소요 시간 히스토그램 (0.1s ~ 30s)
+	// ReconcileDurationSeconds Reconcile 작업 소요 시간 히스토그램 (0.1s ~ 30s)
 	ReconcileDurationSeconds = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "joboperator_reconcile_duration_seconds",
@@ -16,7 +16,7 @@ var (
 		[]string{"name", "namespace", "result"},
 	)
 
-	// ReconcileTotal: Reconcile 총 시도 횟수
+	// ReconcileTotal Reconcile 총 시도 횟수
 	ReconcileTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "joboperator_reconcile_total",
@@ -25,7 +25,7 @@ var (
 		[]string{"name", "namespace", "result"},
 	)
 
-	// ReconcileErrors: Reconcile 에러 발생 횟수
+	// ReconcileErrors Reconcile 에러 발생 횟수
 	ReconcileErrors = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "joboperator_reconcile_errors_total",
