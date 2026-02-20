@@ -20,38 +20,38 @@ import (
 // SessionConfig contains session inputs and defaults.
 // SessionConfig는 세션 입력값과 기본값을 포함함.
 type SessionConfig struct {
-	Namespace          	string
-	MetricsServiceName 	string
-	TestCase           	string
-	Suite              	string
-	
-	// Optional inputs
-	RunID              	string
-	Tags               	map[string]string
+	Namespace          string
+	MetricsServiceName string
+	TestCase           string
+	Suite              string
 
-	ServiceAccountName 	string
-	Token              	string
-	ArtifactsDir       	string
-	
-	Method 				engine.Method
-	Now                	func() time.Time
-	
+	// Optional inputs
+	RunID string
+	Tags  map[string]string
+
+	ServiceAccountName string
+	Token              string
+	ArtifactsDir       string
+
+	Method engine.MeasurementMethod
+	Now    func() time.Time
+
 	// Optional overrides
-	Specs   			[]spec.SLISpec
-	Fetcher 			fetch.MetricsFetcher
+	Specs   []spec.SLISpec
+	Fetcher fetch.MetricsFetcher
 	Writer  summary.Writer
 }
 
 type sessionImpl struct {
 	Config SessionConfig
-	
+
 	// Tunables (defaults are set in NewSession)
 	ServiceURLFormat string
 	// TODO: 향후 추가되거나 올릴예정임.
-	CurlImage        string
+	CurlImage string
 	// ServiceURLFormat 에서 결정됨. 일단 주석으로 남겨둠, 혹시 필요하면 살림.
 	//MetricsPort      int
-	// 추후 
+	// 추후
 	// type SessionConfig struct {
 	//     MetricsScheme string // "https"
 	//     MetricsPort   int    // 8443
@@ -61,7 +61,7 @@ type sessionImpl struct {
 	ScrapeTimeout      time.Duration
 	WaitPodDoneTimeout time.Duration
 	LogsTimeout        time.Duration
-	
+
 	// Normalized (derived) runtime values
 	RunID string
 	Tags  map[string]string
@@ -166,7 +166,7 @@ func (s *Session) NextSummaryPath(filename string) (string, error) {
 	if s == nil || s.impl == nil {
 		return "", fmt.Errorf("harness: session not initialized")
 	}
-	
+
 	if strings.TrimSpace(s.impl.Config.ArtifactsDir) == "" {
 		return "", nil
 	}
@@ -265,7 +265,7 @@ func (s *Session) End(ctx context.Context) (*summary.Summary, error) {
 	}
 
 	eng := engine.New(fetcher, s.impl.writer, nil)
-	
+
 	outPath := ""
 	if s.ShouldWriteArtifacts() {
 		filename := fmt.Sprintf(
@@ -299,7 +299,7 @@ func (s *Session) End(ctx context.Context) (*summary.Summary, error) {
 
 type curlPodFetcher struct {
 	impl *sessionImpl
-	pod     *curlpod.CurlPod
+	pod  *curlpod.CurlPod
 }
 
 func newCurlPodFetcher(impl *sessionImpl) fetch.MetricsFetcher {

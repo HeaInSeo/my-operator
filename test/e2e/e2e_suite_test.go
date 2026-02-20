@@ -39,6 +39,9 @@ var (
 	// runner is used by kubeutil/devutil helpers (context-aware).
 	// runner는 kubeutil/devutil 헬퍼(컨텍스트 인식)에서 사용됩니다.
 	runner kubeutil.CmdRunner = kubeutil.DefaultRunner{}
+	// useExistingCluster determines whether to use an existing cluster or provision Kind.
+	// useExistingCluster는 기존 클러스터를 사용할지 아니면 Kind를 프로비저닝할지 결정합니다.
+	useExistingCluster = os.Getenv("USE_EXISTING_CLUSTER") == "true"
 )
 
 func TestE2E(t *testing.T) {
@@ -55,19 +58,23 @@ var _ = BeforeSuite(func() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	By("building the manager(Operator) image")
-	root, err := devutil.GetProjectDir()
-	Expect(err).NotTo(HaveOccurred())
+	if useExistingCluster {
+		logger.Logf("USE_EXISTING_CLUSTER=true: skipping Kind cluster image build and load")
+	} else {
+		By("building the manager(Operator) image")
+		root, err := devutil.GetProjectDir()
+		Expect(err).NotTo(HaveOccurred())
 
-	cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
-	cmd.Dir = root
+		cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
+		cmd.Dir = root
 
-	_, err = runner.Run(ctx, logger, cmd)
-	Expect(err).NotTo(HaveOccurred(), "Failed to build the manager(Operator) image")
+		_, err = runner.Run(ctx, logger, cmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to build the manager(Operator) image")
 
-	By("loading the manager(Operator) image on Kind")
-	Expect(devutil.LoadImageToKindClusterWithName(ctx, logger, runner, projectImage)).
-		To(Succeed(), "Failed to load the manager(Operator) image into Kind")
+		By("loading the manager(Operator) image on Kind")
+		Expect(devutil.LoadImageToKindClusterWithName(ctx, logger, runner, projectImage)).
+			To(Succeed(), "Failed to load the manager(Operator) image into Kind")
+	}
 
 	// Setup CertManager before the suite if not skipped and if not already installed.
 	if skipCertManagerInstall {

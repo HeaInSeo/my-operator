@@ -10,13 +10,11 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-
 	"github.com/yeongki/my-operator/pkg/devutil"
 	"github.com/yeongki/my-operator/pkg/kubeutil"
 
-	"github.com/yeongki/my-operator/pkg/slo/fetch"
 	"github.com/yeongki/my-operator/pkg/slo/fetch/curlpod"
-	
+
 	"github.com/yeongki/my-operator/test/e2e/harness"
 	e2eenv "github.com/yeongki/my-operator/test/e2e/internal/env"
 	"github.com/yeongki/my-operator/test/e2e/manifests"
@@ -36,10 +34,8 @@ var _ = Describe("Manager", Ordered, func() {
 		cm *curlpod.Client
 
 		// shared per test
-		metricsToken   string
-		metricsPod     *curlpod.CurlPod
-		metricsFetcher fetch.MetricsFetcher
-		// 일단 주석처리함
+		metricsToken string
+		metricsPod   *curlpod.CurlPod
 		//token   string
 	)
 
@@ -135,20 +131,18 @@ var _ = Describe("Manager", Ordered, func() {
 
 	// TODO opts *WaitOptions 로 할지 고민 중 TODO: 5*time.Minute 따로 빼자.
 	BeforeEach(func() {
-    waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-    defer waitCancel()
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer waitCancel()
 
-    opts := kubeutil.WaitOptions{}
+		opts := kubeutil.WaitOptions{}
 
-    By("waiting controller-manager ready")
-    Expect(kubeutil.WaitControllerManagerReady(waitCtx, logger, runner, namespace, opts)).To(Succeed())
+		By("waiting controller-manager ready")
+		Expect(kubeutil.WaitControllerManagerReady(waitCtx, logger, runner, namespace, opts)).To(Succeed())
 
-    By("waiting metrics service endpoints ready")
-    Expect(kubeutil.WaitServiceHasEndpoints(waitCtx, logger, runner, namespace, metricsServiceName, opts)).To(Succeed())
-	
-	})
+		By("waiting metrics service endpoints ready")
+		Expect(kubeutil.WaitServiceHasEndpoints(waitCtx, logger, runner, namespace, metricsServiceName, opts)).To(Succeed())
 
-	// ---- shared token + curlpod (used by BOTH harness + It) ----
+		// ---- shared token + curlpod (used by BOTH harness + It) ----
 		tokCtx, cancel := context.WithTimeout(context.Background(), cfg.TokenRequestTimeout)
 		defer cancel()
 
@@ -177,7 +171,6 @@ var _ = Describe("Manager", Ordered, func() {
 		// 	// timeouts override 필요하면 여기서
 		// }
 		// 일단 이렇게
-		 metricsFetcher = nil
 	})
 
 	// Use V4 Harness (Standardized)
@@ -185,14 +178,13 @@ var _ = Describe("Manager", Ordered, func() {
 	_, err := harness.Attach(func() harness.SessionConfig {
 		// NOTE: token 발급/스크랩 로직은 BeforeEach에서 공유됨.
 		// tokCtx, cancel := context.WithTimeout(context.Background(), cfg.TokenRequestTimeout)
-    	// defer cancel()
+		// defer cancel()
 
 		// By("requesting service account token (for harness)")
-    	// t, err := kubeutil.ServiceAccountToken(tokCtx, logger, runner, namespace, serviceAccountName)
-    	// Expect(err).NotTo(HaveOccurred())
-    	// Expect(t).NotTo(BeEmpty())
+		// t, err := kubeutil.ServiceAccountToken(tokCtx, logger, runner, namespace, serviceAccountName)
+		// Expect(err).NotTo(HaveOccurred())
+		// Expect(t).NotTo(BeEmpty())
 
-		
 		return harness.SessionConfig{
 			// TODO Enabled 지울지 고민하자. 일단 주석처리함.
 			//Enabled: 			cfg.Enabled,
@@ -200,21 +192,21 @@ var _ = Describe("Manager", Ordered, func() {
 			MetricsServiceName: metricsServiceName,
 			TestCase:           "", // Auto-filled by harness
 			Suite:              "e2e",
-			
-			RunID:              cfg.RunID,
+
+			RunID: cfg.RunID,
 			//ServiceAccountName: serviceAccountName,
 			//Token:              t,
-			ArtifactsDir:       cfg.ArtifactsDir,
+			ArtifactsDir: cfg.ArtifactsDir,
 			// TODO 일단 이렇게 주석처리함. 잘 봐야 함.
 			//Fetcher: metricsFetcher,
 
 			// TODO(태그): 런 상관관계(correlation) 분석을 위해 실행 메타 태그를 추가한다.
-        	// 예: git commit SHA, kind cluster name, controller image tag, k8s version, CI run id 등
-        	// Tags: map[string]string{
+			// 예: git commit SHA, kind cluster name, controller image tag, k8s version, CI run id 등
+			// Tags: map[string]string{
 			// 	"commit":  "",
 			// 	"cluster": "",
 			// 	"image":   "",
-        	// },
+			// },
 		}
 	})
 	Expect(err).NotTo(HaveOccurred())

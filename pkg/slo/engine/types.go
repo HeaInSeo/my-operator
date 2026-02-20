@@ -58,7 +58,7 @@ const (
 
 	// RunLocationOutside는 측정이 대상 환경 외부에서 실행됨을 나타낸다.
 	RunLocationOutside RunLocation = "outside"
-	
+
 	// RunTriggerNone은 특정 트리거가 사용되지 않음을 나타낸다.
 	RunTriggerNone RunTrigger = "none"
 

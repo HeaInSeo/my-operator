@@ -23,12 +23,12 @@ func TestNewSession(t *testing.T) {
 
 	sess := NewSession(cfg)
 
-	assert.Equal(t, "test-ns", sess.Config.Namespace)
-	assert.Equal(t, "run-123", sess.RunID)
-	assert.Equal(t, "e2e", sess.Tags["suite"])
-	assert.Equal(t, "TestCase A", sess.Tags["test_case"])
-	assert.Equal(t, "ci", sess.Tags["env"])
-	assert.NotNil(t, sess.writer)
+	assert.Equal(t, "test-ns", sess.impl.Config.Namespace)
+	assert.Equal(t, "run-123", sess.impl.RunID)
+	assert.Equal(t, "e2e", sess.impl.Tags["suite"])
+	assert.Equal(t, "TestCase A", sess.impl.Tags["test_case"])
+	assert.Equal(t, "ci", sess.impl.Tags["env"])
+	assert.NotNil(t, sess.impl.writer)
 }
 
 func TestSession_AutoRunID(t *testing.T) {
@@ -39,7 +39,7 @@ func TestSession_AutoRunID(t *testing.T) {
 	}
 
 	sess := NewSession(cfg)
-	assert.Equal(t, "local-1704103200", sess.RunID)
+	assert.Equal(t, "local-1704103200", sess.impl.RunID)
 }
 
 func TestSession_End(t *testing.T) {

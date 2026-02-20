@@ -7,9 +7,6 @@ import (
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
-
-	"github.com/yeongki/my-operator/pkg/slo/engine"
-	"github.com/yeongki/my-operator/pkg/slo/fetch"
 )
 
 // Config defines the inputs for the SLO measurement session.
@@ -25,8 +22,8 @@ import (
 // 	ArtifactsDir string
 // 	Tags         map[string]string
 // 	// 게측 코드에서 선택할 수 있도록 해줌.
-// 	Method engine.Method             
-//     Fetcher fetch.MetricsFetcher      
+// 	Method engine.Method
+//     Fetcher fetch.MetricsFetcher
 // }
 
 // Attach registers BeforeEach/AfterEach hooks that call the provider function
@@ -76,7 +73,7 @@ func Attach(provider func() SessionConfig) (*Session, error) {
 		}
 
 		newSess := NewSession(cfg)
-			
+
 		session.reset(newSess)
 		session.Start()
 	})
@@ -95,4 +92,10 @@ func Attach(provider func() SessionConfig) (*Session, error) {
 	})
 
 	return session, nil
+}
+
+func isEnabledByEnv() bool {
+	// TODO: read from E2E_SLO_ENABLED or similar if needed.
+	// For now, always enable since we are in the attach func
+	return true
 }
